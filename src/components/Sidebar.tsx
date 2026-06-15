@@ -4,7 +4,8 @@ import {
   BarChart3, Monitor, Network, Send, Workflow, Settings as SettingsIcon, ShieldCheck,
 } from "lucide-react";
 
-const NAV = [
+type NavItem = { to: string; label: string; icon: typeof LayoutDashboard; exact?: boolean };
+const NAV: NavItem[] = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { to: "/stations", label: "Stations", icon: Server },
   { to: "/cameras", label: "Cameras", icon: Video },
@@ -16,7 +17,7 @@ const NAV = [
   { to: "/telegram", label: "Telegram", icon: Send },
   { to: "/n8n", label: "n8n", icon: Workflow },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
-] as const;
+];
 
 export function Sidebar() {
   const path = useRouterState({ select: (s) => s.location.pathname });
