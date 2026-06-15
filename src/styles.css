@@ -117,11 +117,11 @@
 
 @utility pulse-dot {
   position: relative;
-}
-@utility pulse-dot::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: 9999px;
-  animation: pulse-ring 1.8s ease-out infinite;
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 9999px;
+    animation: pulse-ring 1.8s ease-out infinite;
+  }
 }
