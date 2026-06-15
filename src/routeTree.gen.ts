@@ -9,8 +9,68 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as TelegramRouteImport } from './routes/telegram'
+import { Route as StationsRouteImport } from './routes/stations'
+import { Route as SettingsRouteImport } from './routes/settings'
+import { Route as RustdeskRouteImport } from './routes/rustdesk'
+import { Route as N8nRouteImport } from './routes/n8n'
+import { Route as MapRouteImport } from './routes/map'
+import { Route as HeadscaleRouteImport } from './routes/headscale'
+import { Route as CamerasRouteImport } from './routes/cameras'
+import { Route as AnalyticsRouteImport } from './routes/analytics'
+import { Route as AlertsRouteImport } from './routes/alerts'
 import { Route as IndexRouteImport } from './routes/index'
 
+const TelegramRoute = TelegramRouteImport.update({
+  id: '/telegram',
+  path: '/telegram',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StationsRoute = StationsRouteImport.update({
+  id: '/stations',
+  path: '/stations',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RustdeskRoute = RustdeskRouteImport.update({
+  id: '/rustdesk',
+  path: '/rustdesk',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const N8nRoute = N8nRouteImport.update({
+  id: '/n8n',
+  path: '/n8n',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MapRoute = MapRouteImport.update({
+  id: '/map',
+  path: '/map',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HeadscaleRoute = HeadscaleRouteImport.update({
+  id: '/headscale',
+  path: '/headscale',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CamerasRoute = CamerasRouteImport.update({
+  id: '/cameras',
+  path: '/cameras',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AnalyticsRoute = AnalyticsRouteImport.update({
+  id: '/analytics',
+  path: '/analytics',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AlertsRoute = AlertsRouteImport.update({
+  id: '/alerts',
+  path: '/alerts',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -19,28 +79,172 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/alerts': typeof AlertsRoute
+  '/analytics': typeof AnalyticsRoute
+  '/cameras': typeof CamerasRoute
+  '/headscale': typeof HeadscaleRoute
+  '/map': typeof MapRoute
+  '/n8n': typeof N8nRoute
+  '/rustdesk': typeof RustdeskRoute
+  '/settings': typeof SettingsRoute
+  '/stations': typeof StationsRoute
+  '/telegram': typeof TelegramRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/alerts': typeof AlertsRoute
+  '/analytics': typeof AnalyticsRoute
+  '/cameras': typeof CamerasRoute
+  '/headscale': typeof HeadscaleRoute
+  '/map': typeof MapRoute
+  '/n8n': typeof N8nRoute
+  '/rustdesk': typeof RustdeskRoute
+  '/settings': typeof SettingsRoute
+  '/stations': typeof StationsRoute
+  '/telegram': typeof TelegramRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/alerts': typeof AlertsRoute
+  '/analytics': typeof AnalyticsRoute
+  '/cameras': typeof CamerasRoute
+  '/headscale': typeof HeadscaleRoute
+  '/map': typeof MapRoute
+  '/n8n': typeof N8nRoute
+  '/rustdesk': typeof RustdeskRoute
+  '/settings': typeof SettingsRoute
+  '/stations': typeof StationsRoute
+  '/telegram': typeof TelegramRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths:
+    | '/'
+    | '/alerts'
+    | '/analytics'
+    | '/cameras'
+    | '/headscale'
+    | '/map'
+    | '/n8n'
+    | '/rustdesk'
+    | '/settings'
+    | '/stations'
+    | '/telegram'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to:
+    | '/'
+    | '/alerts'
+    | '/analytics'
+    | '/cameras'
+    | '/headscale'
+    | '/map'
+    | '/n8n'
+    | '/rustdesk'
+    | '/settings'
+    | '/stations'
+    | '/telegram'
+  id:
+    | '__root__'
+    | '/'
+    | '/alerts'
+    | '/analytics'
+    | '/cameras'
+    | '/headscale'
+    | '/map'
+    | '/n8n'
+    | '/rustdesk'
+    | '/settings'
+    | '/stations'
+    | '/telegram'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AlertsRoute: typeof AlertsRoute
+  AnalyticsRoute: typeof AnalyticsRoute
+  CamerasRoute: typeof CamerasRoute
+  HeadscaleRoute: typeof HeadscaleRoute
+  MapRoute: typeof MapRoute
+  N8nRoute: typeof N8nRoute
+  RustdeskRoute: typeof RustdeskRoute
+  SettingsRoute: typeof SettingsRoute
+  StationsRoute: typeof StationsRoute
+  TelegramRoute: typeof TelegramRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/telegram': {
+      id: '/telegram'
+      path: '/telegram'
+      fullPath: '/telegram'
+      preLoaderRoute: typeof TelegramRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/stations': {
+      id: '/stations'
+      path: '/stations'
+      fullPath: '/stations'
+      preLoaderRoute: typeof StationsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/rustdesk': {
+      id: '/rustdesk'
+      path: '/rustdesk'
+      fullPath: '/rustdesk'
+      preLoaderRoute: typeof RustdeskRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/n8n': {
+      id: '/n8n'
+      path: '/n8n'
+      fullPath: '/n8n'
+      preLoaderRoute: typeof N8nRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/map': {
+      id: '/map'
+      path: '/map'
+      fullPath: '/map'
+      preLoaderRoute: typeof MapRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/headscale': {
+      id: '/headscale'
+      path: '/headscale'
+      fullPath: '/headscale'
+      preLoaderRoute: typeof HeadscaleRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/cameras': {
+      id: '/cameras'
+      path: '/cameras'
+      fullPath: '/cameras'
+      preLoaderRoute: typeof CamerasRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/analytics': {
+      id: '/analytics'
+      path: '/analytics'
+      fullPath: '/analytics'
+      preLoaderRoute: typeof AnalyticsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/alerts': {
+      id: '/alerts'
+      path: '/alerts'
+      fullPath: '/alerts'
+      preLoaderRoute: typeof AlertsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -53,17 +257,17 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AlertsRoute: AlertsRoute,
+  AnalyticsRoute: AnalyticsRoute,
+  CamerasRoute: CamerasRoute,
+  HeadscaleRoute: HeadscaleRoute,
+  MapRoute: MapRoute,
+  N8nRoute: N8nRoute,
+  RustdeskRoute: RustdeskRoute,
+  SettingsRoute: SettingsRoute,
+  StationsRoute: StationsRoute,
+  TelegramRoute: TelegramRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
