@@ -1,4 +1,4 @@
-import type { StationStatus } from "@/lib/mock-data";
+export type StationStatus = "online" | "warning" | "offline";
 
 const MAP: Record<StationStatus, { label: string; cls: string; dot: string }> = {
   online: { label: "Online", cls: "text-success border-success/30 bg-success/10", dot: "bg-success" },
