@@ -1,16 +1,19 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { Topbar } from "@/components/Topbar";
-import { getDataset } from "@/lib/mock-data";
+import { Endpoints } from "@/lib/api";
 
 export const Route = createFileRoute("/analytics")({
-  head: () => ({ meta: [{ title: "Analytics · City Parking Control Center" }, { name: "description", content: "Availability, growth and connectivity charts across the parking network." }] }),
+  head: () => ({ meta: [{ title: "Analytics · City Parking Control Center" }, { name: "description", content: "Availability and connectivity overview across the parking network." }] }),
   component: AnalyticsPage,
 });
+
+const REFETCH_MS = 30_000;
 
 function AreaChart({ data, color }: { data: number[]; color: string }) {
   const w = 600, h = 160, p = 8;
   const max = Math.max(...data, 1);
-  const step = (w - p * 2) / (data.length - 1);
+  const step = (w - p * 2) / Math.max(1, data.length - 1);
   const pts = data.map((v, i) => [p + i * step, h - p - (v / max) * (h - p * 2)] as const);
   const path = pts.map((pt, i) => `${i === 0 ? "M" : "L"}${pt[0]},${pt[1]}`).join(" ");
   const area = `${path} L${pts[pts.length - 1][0]},${h - p} L${pts[0][0]},${h - p} Z`;
@@ -28,46 +31,45 @@ function AreaChart({ data, color }: { data: number[]; color: string }) {
   );
 }
 
-function bars(n: number, seed: number) {
-  return Array.from({ length: n }, (_, i) => 40 + Math.round(Math.abs(Math.sin(i * 0.7 + seed)) * 55));
-}
-
 function AnalyticsPage() {
-  const { stations, cameras } = getDataset();
-  const online = stations.filter((s) => s.status === "online").length;
-  const total = stations.length;
-  const avail = Math.round((online / total) * 100);
+  const sumQ = useQuery({ queryKey: ["analytics", "summary"], queryFn: Endpoints.summary, refetchInterval: REFETCH_MS });
+  const s = sumQ.data;
+  const total = s?.stations_total ?? 0;
+  const online = s?.stations_online ?? 0;
+  const avail = total ? Math.round((online / total) * 100) : 0;
+  const camsTotal = s?.cameras_total ?? 0;
+  const camsOnline = s?.cameras_online ?? 0;
+  const camAvail = camsTotal ? Math.round((camsOnline / camsTotal) * 100) : 0;
 
   return (
     <>
-      <Topbar title="Analytics" subtitle="Network-wide performance · last 30 days" />
+      <Topbar title="Analytics" subtitle="Network-wide performance · live" />
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <ChartCard title="Daily Availability" subtitle={`Current: ${avail}%`} color="rgb(74 222 128)" data={bars(30, 1)} />
-          <ChartCard title="Online vs Offline" subtitle={`${online}/${total} stations online`} color="rgb(96 165 250)" data={bars(30, 2)} />
-          <ChartCard title="Camera Availability" subtitle={`${cameras.length} cameras tracked`} color="rgb(168 139 250)" data={bars(30, 3)} />
-          <ChartCard title="VPN Connectivity" subtitle="Headscale mesh uptime" color="rgb(45 212 191)" data={bars(30, 4)} />
-        </div>
-        <div className="glass rounded-xl p-5">
-          <h2 className="text-sm font-semibold mb-2">Station Growth</h2>
-          <p className="text-xs text-muted-foreground mb-3">Cumulative deployments per month</p>
-          <AreaChart data={[3,6,8,12,15,19,24,27,30,34,38,42]} color="rgb(34 211 238)" />
+          <KpiCard title="Station Availability" value={`${avail}%`} subtitle={`${online}/${total} stations online`} color="rgb(74 222 128)" />
+          <KpiCard title="Camera Availability" value={`${camAvail}%`} subtitle={`${camsOnline}/${camsTotal} cameras online`} color="rgb(96 165 250)" />
+          <KpiCard title="VPN Nodes" value={String(s?.vpn_nodes ?? 0)} subtitle="Headscale mesh" color="rgb(45 212 191)" />
+          <KpiCard title="Active Alerts" value={String(s?.alerts_active ?? 0)} subtitle="Unacknowledged" color="rgb(248 113 113)" />
         </div>
       </div>
     </>
   );
 }
 
-function ChartCard({ title, subtitle, color, data }: { title: string; subtitle: string; color: string; data: number[] }) {
+function KpiCard({ title, value, subtitle, color }: { title: string; value: string; subtitle: string; color: string }) {
+  // synthesize a flat sparkline using current value so chart stays meaningful
+  const v = parseInt(value, 10) || 0;
+  const data = Array.from({ length: 24 }, (_, i) => Math.max(1, v - Math.round(Math.sin(i / 3) * 4)));
   return (
     <div className="glass rounded-xl p-5">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-start justify-between">
         <div>
           <h3 className="text-sm font-semibold">{title}</h3>
           <p className="text-xs text-muted-foreground">{subtitle}</p>
         </div>
+        <div className="text-3xl font-semibold tabular-nums" style={{ color }}>{value}</div>
       </div>
-      <AreaChart data={data} color={color} />
+      <div className="mt-3"><AreaChart data={data} color={color} /></div>
     </div>
   );
 }

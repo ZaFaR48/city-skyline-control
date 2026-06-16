@@ -1,8 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { AlertTriangle, AlertOctagon, Info, Check, Search } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, AlertOctagon, Info, Check, Search, Loader2 } from "lucide-react";
 import { Topbar } from "@/components/Topbar";
-import { getDataset, type AlertItem, type AlertSeverity, type AlertType } from "@/lib/mock-data";
+import { Endpoints } from "@/lib/api";
+import type { AlertSeverity, AlertType } from "@/lib/types";
 
 export const Route = createFileRoute("/alerts")({
   head: () => ({
@@ -29,25 +31,38 @@ function sevIcon(s: AlertSeverity) {
   return <Info className="size-4 text-info" />;
 }
 
-function fmt(iso: string) {
-  return new Date(iso).toLocaleString();
-}
+const REFETCH_MS = 30_000;
 
 function AlertsPage() {
-  const { alerts } = getDataset();
+  const qc = useQueryClient();
+  const alertsQ = useQuery({ queryKey: ["alerts"], queryFn: Endpoints.alerts, refetchInterval: REFETCH_MS });
+  const stationsQ = useQuery({ queryKey: ["stations"], queryFn: Endpoints.stations, refetchInterval: REFETCH_MS });
+
+  const alerts = alertsQ.data ?? [];
+  const stations = stationsQ.data ?? [];
+  const stationName = useMemo(() => {
+    const m = new Map<number, string>();
+    stations.forEach((s) => m.set(s.id, s.name));
+    return (id: number | null) => (id == null ? "—" : (m.get(id) ?? `#${id}`));
+  }, [stations]);
+
+  const ackM = useMutation({
+    mutationFn: (id: number) => Endpoints.ackAlert(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["alerts"] }),
+  });
+
   const [sev, setSev] = useState<"all" | AlertSeverity>("all");
   const [type, setType] = useState<"all" | AlertType>("all");
   const [q, setQ] = useState("");
-  const [acked, setAcked] = useState<Set<string>>(new Set());
 
   const list = useMemo(() => {
     const ql = q.toLowerCase();
     return alerts.filter((a) =>
       (sev === "all" || a.severity === sev) &&
       (type === "all" || a.type === type) &&
-      (ql === "" || a.station.toLowerCase().includes(ql) || a.message.toLowerCase().includes(ql))
+      (ql === "" || stationName(a.station_id).toLowerCase().includes(ql) || a.message.toLowerCase().includes(ql))
     );
-  }, [alerts, sev, type, q]);
+  }, [alerts, sev, type, q, stationName]);
 
   const counts = useMemo(() => ({
     critical: alerts.filter((a) => a.severity === "critical").length,
@@ -55,13 +70,11 @@ function AlertsPage() {
     info: alerts.filter((a) => a.severity === "info").length,
   }), [alerts]);
 
-  function ack(id: string) {
-    setAcked((s) => new Set(s).add(id));
-  }
+  const unacked = alerts.filter((a) => !a.acknowledged).length;
 
   return (
     <>
-      <Topbar title="Alerts" subtitle={`${alerts.length} total · ${alerts.length - acked.size} unacknowledged`} />
+      <Topbar title="Alerts" subtitle={`${alerts.length} total · ${unacked} unacknowledged`} />
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
         <div className="grid grid-cols-3 gap-4">
           <SevCard label="Critical" value={counts.critical} tone="danger" icon={<AlertOctagon className="size-5" />} />
@@ -102,25 +115,25 @@ function AlertsPage() {
               </tr>
             </thead>
             <tbody>
-              {list.map((a) => {
-                const ok = acked.has(a.id);
-                return (
-                  <tr key={a.id} className={`border-t border-border ${ok ? "opacity-50" : ""}`}>
-                    <td className="px-4 py-3">{sevIcon(a.severity)}</td>
-                    <td className="px-4 py-3 text-xs uppercase tracking-wider text-muted-foreground">{TYPE_LABEL[a.type]}</td>
-                    <td className="px-4 py-3 font-medium">{a.station}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{a.message}</td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">{fmt(a.createdAt)}</td>
-                    <td className="px-4 py-3 text-right">
-                      <button onClick={() => ack(a.id)} disabled={ok}
-                        className="inline-flex items-center gap-1 h-7 px-2 text-xs rounded-md border border-border bg-accent/40 hover:bg-accent text-muted-foreground hover:text-foreground disabled:opacity-50">
-                        <Check className="size-3.5" /> {ok ? "Acked" : "Ack"}
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-              {list.length === 0 && (
+              {alertsQ.isLoading && (
+                <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin inline-block mr-2" /> Loading…</td></tr>
+              )}
+              {!alertsQ.isLoading && list.map((a) => (
+                <tr key={a.id} className={`border-t border-border ${a.acknowledged ? "opacity-50" : ""}`}>
+                  <td className="px-4 py-3">{sevIcon(a.severity)}</td>
+                  <td className="px-4 py-3 text-xs uppercase tracking-wider text-muted-foreground">{TYPE_LABEL[a.type] ?? a.type}</td>
+                  <td className="px-4 py-3 font-medium">{stationName(a.station_id)}</td>
+                  <td className="px-4 py-3 text-muted-foreground">{a.message}</td>
+                  <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">{new Date(a.created_at).toLocaleString()}</td>
+                  <td className="px-4 py-3 text-right">
+                    <button onClick={() => ackM.mutate(a.id)} disabled={a.acknowledged || ackM.isPending}
+                      className="inline-flex items-center gap-1 h-7 px-2 text-xs rounded-md border border-border bg-accent/40 hover:bg-accent text-muted-foreground hover:text-foreground disabled:opacity-50">
+                      <Check className="size-3.5" /> {a.acknowledged ? "Acked" : "Ack"}
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {!alertsQ.isLoading && list.length === 0 && (
                 <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-muted-foreground">No alerts match.</td></tr>
               )}
             </tbody>

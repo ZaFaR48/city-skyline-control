@@ -15,6 +15,7 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as RustdeskRouteImport } from './routes/rustdesk'
 import { Route as N8nRouteImport } from './routes/n8n'
 import { Route as MapRouteImport } from './routes/map'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as HeadscaleRouteImport } from './routes/headscale'
 import { Route as CamerasRouteImport } from './routes/cameras'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
@@ -51,6 +52,11 @@ const MapRoute = MapRouteImport.update({
   path: '/map',
   getParentRoute: () => rootRouteImport,
 } as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const HeadscaleRoute = HeadscaleRouteImport.update({
   id: '/headscale',
   path: '/headscale',
@@ -83,6 +89,7 @@ export interface FileRoutesByFullPath {
   '/analytics': typeof AnalyticsRoute
   '/cameras': typeof CamerasRoute
   '/headscale': typeof HeadscaleRoute
+  '/login': typeof LoginRoute
   '/map': typeof MapRoute
   '/n8n': typeof N8nRoute
   '/rustdesk': typeof RustdeskRoute
@@ -96,6 +103,7 @@ export interface FileRoutesByTo {
   '/analytics': typeof AnalyticsRoute
   '/cameras': typeof CamerasRoute
   '/headscale': typeof HeadscaleRoute
+  '/login': typeof LoginRoute
   '/map': typeof MapRoute
   '/n8n': typeof N8nRoute
   '/rustdesk': typeof RustdeskRoute
@@ -110,6 +118,7 @@ export interface FileRoutesById {
   '/analytics': typeof AnalyticsRoute
   '/cameras': typeof CamerasRoute
   '/headscale': typeof HeadscaleRoute
+  '/login': typeof LoginRoute
   '/map': typeof MapRoute
   '/n8n': typeof N8nRoute
   '/rustdesk': typeof RustdeskRoute
@@ -125,6 +134,7 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/cameras'
     | '/headscale'
+    | '/login'
     | '/map'
     | '/n8n'
     | '/rustdesk'
@@ -138,6 +148,7 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/cameras'
     | '/headscale'
+    | '/login'
     | '/map'
     | '/n8n'
     | '/rustdesk'
@@ -151,6 +162,7 @@ export interface FileRouteTypes {
     | '/analytics'
     | '/cameras'
     | '/headscale'
+    | '/login'
     | '/map'
     | '/n8n'
     | '/rustdesk'
@@ -165,6 +177,7 @@ export interface RootRouteChildren {
   AnalyticsRoute: typeof AnalyticsRoute
   CamerasRoute: typeof CamerasRoute
   HeadscaleRoute: typeof HeadscaleRoute
+  LoginRoute: typeof LoginRoute
   MapRoute: typeof MapRoute
   N8nRoute: typeof N8nRoute
   RustdeskRoute: typeof RustdeskRoute
@@ -217,6 +230,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MapRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/headscale': {
       id: '/headscale'
       path: '/headscale'
@@ -261,6 +281,7 @@ const rootRouteChildren: RootRouteChildren = {
   AnalyticsRoute: AnalyticsRoute,
   CamerasRoute: CamerasRoute,
   HeadscaleRoute: HeadscaleRoute,
+  LoginRoute: LoginRoute,
   MapRoute: MapRoute,
   N8nRoute: N8nRoute,
   RustdeskRoute: RustdeskRoute,

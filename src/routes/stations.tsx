@@ -1,12 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
-  Eye, Pencil, Video, Monitor, TerminalSquare, Search, ChevronLeft, ChevronRight, ArrowUpDown,
+  Eye, Pencil, Video, Monitor, TerminalSquare, Search, ChevronLeft, ChevronRight, ArrowUpDown, Loader2,
 } from "lucide-react";
 import { Topbar } from "@/components/Topbar";
 import { StatusBadge, pingTone } from "@/components/StatusBadge";
 import { Meter } from "@/components/Meter";
-import { getDataset, type Station, type StationStatus } from "@/lib/mock-data";
+import { Endpoints } from "@/lib/api";
+import type { Station, StationStatus } from "@/lib/types";
 
 export const Route = createFileRoute("/stations")({
   head: () => ({
@@ -18,10 +20,18 @@ export const Route = createFileRoute("/stations")({
   component: StationsPage,
 });
 
-type SortKey = keyof Pick<Station, "id" | "name" | "region" | "status" | "ping" | "cpu" | "ram" | "disk" | "lastSeen">;
+type SortKey = keyof Pick<Station, "id" | "name" | "region" | "status" | "last_ping_ms" | "cpu" | "ram" | "disk" | "last_seen">;
+
+const REFETCH_MS = 30_000;
 
 function StationsPage() {
-  const { stations } = getDataset();
+  const stationsQ = useQuery({
+    queryKey: ["stations"],
+    queryFn: Endpoints.stations,
+    refetchInterval: REFETCH_MS,
+  });
+  const stations = stationsQ.data ?? [];
+
   const [q, setQ] = useState("");
   const [region, setRegion] = useState<string>("all");
   const [status, setStatus] = useState<"all" | StationStatus>("all");
@@ -38,9 +48,9 @@ function StationsPage() {
       (region === "all" || s.region === region) &&
       (ql === "" ||
         s.name.toLowerCase().includes(ql) ||
-        s.id.toLowerCase().includes(ql) ||
-        s.vpnIp.includes(ql) ||
-        s.localIp.includes(ql) ||
+        s.code.toLowerCase().includes(ql) ||
+        s.vpn_ip.includes(ql) ||
+        s.local_ip.includes(ql) ||
         s.address.toLowerCase().includes(ql))
     );
   }, [stations, q, region, status]);
@@ -48,7 +58,8 @@ function StationsPage() {
   const sorted = useMemo(() => {
     const arr = [...filtered];
     arr.sort((a, b) => {
-      const av = a[sort.key]; const bv = b[sort.key];
+      const av = a[sort.key] ?? "";
+      const bv = b[sort.key] ?? "";
       if (av < bv) return sort.dir === "asc" ? -1 : 1;
       if (av > bv) return sort.dir === "asc" ? 1 : -1;
       return 0;
@@ -73,7 +84,7 @@ function StationsPage() {
             <Search className="size-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }}
-              placeholder="Search by name, ID, IP, address…"
+              placeholder="Search by name, code, IP, address…"
               className="w-full h-9 pl-9 pr-3 rounded-md bg-input/60 border border-border text-sm focus:outline-none focus:ring-2 focus:ring-ring/50"
             />
           </div>
@@ -93,29 +104,32 @@ function StationsPage() {
                   <th className="text-left font-medium px-4 py-3">VPN IP</th>
                   <th className="text-left font-medium px-4 py-3">Local IP</th>
                   <Th onClick={() => toggleSort("status")}>Status</Th>
-                  <Th onClick={() => toggleSort("ping")} className="text-right">Ping</Th>
+                  <Th onClick={() => toggleSort("last_ping_ms")} className="text-right">Ping</Th>
                   <Th onClick={() => toggleSort("cpu")}>CPU</Th>
                   <Th onClick={() => toggleSort("ram")}>RAM</Th>
                   <Th onClick={() => toggleSort("disk")}>Disk</Th>
-                  <Th onClick={() => toggleSort("lastSeen")}>Last Seen</Th>
+                  <Th onClick={() => toggleSort("last_seen")}>Last Seen</Th>
                   <th className="text-right font-medium px-4 py-3">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {slice.map((s) => (
+                {stationsQ.isLoading && (
+                  <tr><td colSpan={13} className="px-4 py-10 text-center text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin inline-block mr-2" /> Loading…</td></tr>
+                )}
+                {!stationsQ.isLoading && slice.map((s) => (
                   <tr key={s.id} className="border-t border-border hover:bg-accent/30 transition-colors">
-                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{s.id}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{s.code}</td>
                     <td className="px-4 py-3 font-medium">{s.name}</td>
                     <td className="px-4 py-3 text-muted-foreground">{s.region}</td>
                     <td className="px-4 py-3 text-muted-foreground max-w-[180px] truncate">{s.address}</td>
-                    <td className="px-4 py-3 font-mono text-xs">{s.vpnIp}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{s.localIp}</td>
+                    <td className="px-4 py-3 font-mono text-xs">{s.vpn_ip}</td>
+                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{s.local_ip}</td>
                     <td className="px-4 py-3"><StatusBadge status={s.status} /></td>
-                    <td className={`px-4 py-3 text-right font-mono tabular-nums ${pingTone(s.ping, s.status)}`}>{s.ping || "—"}ms</td>
+                    <td className={`px-4 py-3 text-right font-mono tabular-nums ${pingTone(s.last_ping_ms, s.status)}`}>{s.last_ping_ms || "—"}ms</td>
                     <td className="px-4 py-3 w-[110px]"><Meter value={s.cpu} /></td>
                     <td className="px-4 py-3 w-[110px]"><Meter value={s.ram} /></td>
                     <td className="px-4 py-3 w-[110px]"><Meter value={s.disk} /></td>
-                    <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">{new Date(s.lastSeen).toLocaleTimeString()}</td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">{s.last_seen ? new Date(s.last_seen).toLocaleTimeString() : "—"}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
                         <ActionBtn title="View"><Eye className="size-3.5" /></ActionBtn>
@@ -127,7 +141,7 @@ function StationsPage() {
                     </td>
                   </tr>
                 ))}
-                {slice.length === 0 && (
+                {!stationsQ.isLoading && slice.length === 0 && (
                   <tr><td colSpan={13} className="px-4 py-10 text-center text-sm text-muted-foreground">No stations match the current filters.</td></tr>
                 )}
               </tbody>
@@ -135,7 +149,7 @@ function StationsPage() {
           </div>
           <div className="flex items-center justify-between px-4 py-3 border-t border-border text-xs text-muted-foreground">
             <span>
-              Showing {(curPage - 1) * pageSize + 1}–{Math.min(curPage * pageSize, sorted.length)} of {sorted.length}
+              Showing {sorted.length === 0 ? 0 : (curPage - 1) * pageSize + 1}–{Math.min(curPage * pageSize, sorted.length)} of {sorted.length}
             </span>
             <div className="flex items-center gap-1">
               <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={curPage === 1} className="h-7 px-2 rounded-md border border-border hover:bg-accent disabled:opacity-40 inline-flex items-center gap-1"><ChevronLeft className="size-3.5" /></button>
