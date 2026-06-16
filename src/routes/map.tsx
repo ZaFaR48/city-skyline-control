@@ -1,14 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { Topbar } from "@/components/Topbar";
-import { getDataset } from "@/lib/mock-data";
+import { Endpoints } from "@/lib/api";
+import { Loader2 } from "lucide-react";
 
 export const Route = createFileRoute("/map")({
   head: () => ({ meta: [{ title: "Map · City Parking Control Center" }, { name: "description", content: "Geographic distribution of stations across Tajikistan." }] }),
   component: MapPage,
 });
 
-// Tajikistan rough bounding box
 const BBOX = { minLng: 67.3, maxLng: 75.2, minLat: 36.6, maxLat: 41.1 };
+const REFETCH_MS = 30_000;
 
 function project(lat: number, lng: number, w: number, h: number) {
   const x = ((lng - BBOX.minLng) / (BBOX.maxLng - BBOX.minLng)) * w;
@@ -17,8 +19,10 @@ function project(lat: number, lng: number, w: number, h: number) {
 }
 
 function MapPage() {
-  const { stations } = getDataset();
+  const q = useQuery({ queryKey: ["stations"], queryFn: Endpoints.stations, refetchInterval: REFETCH_MS });
+  const stations = q.data ?? [];
   const w = 1000, h = 560;
+
   return (
     <>
       <Topbar title="Map" subtitle="Tajikistan · all stations" />
@@ -33,6 +37,9 @@ function MapPage() {
             </div>
           </div>
           <div className="relative w-full aspect-[1000/560] rounded-lg overflow-hidden border border-border bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900">
+            {q.isLoading && (
+              <div className="absolute inset-0 grid place-items-center text-muted-foreground"><Loader2 className="size-6 animate-spin" /></div>
+            )}
             <svg viewBox={`0 0 ${w} ${h}`} className="absolute inset-0 w-full h-full">
               <defs>
                 <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
@@ -40,7 +47,6 @@ function MapPage() {
                 </pattern>
               </defs>
               <rect width={w} height={h} fill="url(#grid)" />
-              {/* Stylized Tajikistan silhouette */}
               <path d="M120,360 C160,280 220,260 280,270 C340,210 420,180 480,200 C540,170 620,160 680,180 C740,160 820,170 880,210 C900,260 880,310 840,340 C800,380 760,360 700,380 C660,420 600,430 540,420 C480,440 420,430 360,410 C300,420 240,400 200,420 C160,420 130,400 120,360 Z"
                 fill="rgba(80,140,220,0.08)" stroke="rgba(120,180,255,0.35)" strokeWidth="1.2" />
               {stations.map((s) => {
@@ -55,14 +61,13 @@ function MapPage() {
                       </circle>
                     )}
                     <circle cx={x} cy={y} r="4" fill={color} stroke="rgba(0,0,0,0.6)" strokeWidth="1">
-                      <title>{`${s.name} · ${s.region} · ${s.status} · ${s.vpnIp}`}</title>
+                      <title>{`${s.name} · ${s.region} · ${s.status} · ${s.vpn_ip}`}</title>
                     </circle>
                   </g>
                 );
               })}
             </svg>
           </div>
-          <p className="mt-3 text-xs text-muted-foreground">Hover a marker for details. A full Leaflet tile-map can drop in by replacing this SVG.</p>
         </div>
       </div>
     </>
