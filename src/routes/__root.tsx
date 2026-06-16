@@ -4,6 +4,8 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  useRouterState,
+  useNavigate,
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
@@ -12,6 +14,7 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { Sidebar } from "@/components/Sidebar";
+import { isAuthenticated } from "@/lib/auth";
 
 function NotFoundComponent() {
   return (
@@ -88,16 +91,35 @@ function RootShell({ children }: { children: ReactNode }) {
   );
 }
 
+function AuthGate({ children }: { children: ReactNode }) {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const navigate = useNavigate();
+  const isLogin = pathname === "/login";
+
+  useEffect(() => {
+    if (!isLogin && !isAuthenticated()) {
+      navigate({ to: "/login", replace: true });
+    }
+  }, [isLogin, pathname, navigate]);
+
+  if (isLogin) return <>{children}</>;
+  if (!isAuthenticated()) return null;
+
+  return (
+    <div className="flex h-screen w-full overflow-hidden">
+      <Sidebar />
+      <div className="flex-1 flex flex-col min-w-0">{children}</div>
+    </div>
+  );
+}
+
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   return (
     <QueryClientProvider client={queryClient}>
-      <div className="flex h-screen w-full overflow-hidden">
-        <Sidebar />
-        <div className="flex-1 flex flex-col min-w-0">
-          <Outlet />
-        </div>
-      </div>
+      <AuthGate>
+        <Outlet />
+      </AuthGate>
     </QueryClientProvider>
   );
 }
