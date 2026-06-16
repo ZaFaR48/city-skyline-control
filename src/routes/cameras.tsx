@@ -1,9 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Camera, Image as ImageIcon, Move, Settings2, Video, Search } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Camera, Image as ImageIcon, Move, Settings2, Video, Search, Loader2 } from "lucide-react";
 import { Topbar } from "@/components/Topbar";
 import { StatusBadge } from "@/components/StatusBadge";
-import { getDataset, type StationStatus } from "@/lib/mock-data";
+import { Endpoints } from "@/lib/api";
+import type { StationStatus } from "@/lib/types";
 
 export const Route = createFileRoute("/cameras")({
   head: () => ({
@@ -15,8 +17,20 @@ export const Route = createFileRoute("/cameras")({
   component: CamerasPage,
 });
 
+const REFETCH_MS = 30_000;
+
 function CamerasPage() {
-  const { cameras } = getDataset();
+  const camsQ = useQuery({ queryKey: ["cameras"], queryFn: Endpoints.cameras, refetchInterval: REFETCH_MS });
+  const stationsQ = useQuery({ queryKey: ["stations"], queryFn: Endpoints.stations, refetchInterval: REFETCH_MS });
+
+  const cameras = camsQ.data ?? [];
+  const stations = stationsQ.data ?? [];
+  const stationName = useMemo(() => {
+    const map = new Map<number, string>();
+    stations.forEach((s) => map.set(s.id, s.name));
+    return (id: number) => map.get(id) ?? `Station #${id}`;
+  }, [stations]);
+
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<"all" | StationStatus>("all");
 
@@ -24,9 +38,9 @@ function CamerasPage() {
     const ql = q.toLowerCase();
     return cameras.filter((c) =>
       (status === "all" || c.status === status) &&
-      (ql === "" || c.name.toLowerCase().includes(ql) || c.stationName.toLowerCase().includes(ql) || c.ip.includes(ql))
+      (ql === "" || c.name.toLowerCase().includes(ql) || stationName(c.station_id).toLowerCase().includes(ql) || c.ip.includes(ql))
     );
-  }, [cameras, q, status]);
+  }, [cameras, q, status, stationName]);
 
   return (
     <>
@@ -50,6 +64,12 @@ function CamerasPage() {
             ))}
           </div>
         </div>
+
+        {camsQ.isLoading && (
+          <div className="glass rounded-xl p-10 grid place-items-center text-muted-foreground">
+            <Loader2 className="size-6 animate-spin" />
+          </div>
+        )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 gap-4">
           {filtered.map((cam) => (
@@ -81,10 +101,10 @@ function CamerasPage() {
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="font-medium truncate">{cam.name}</div>
-                    <div className="text-xs text-muted-foreground truncate">{cam.stationName} · {cam.ip}</div>
+                    <div className="text-xs text-muted-foreground truncate">{stationName(cam.station_id)} · {cam.ip}</div>
                   </div>
                 </div>
-                <div className="mt-2 font-mono text-[11px] text-muted-foreground truncate" title={cam.rtsp}>{cam.rtsp}</div>
+                <div className="mt-2 font-mono text-[11px] text-muted-foreground truncate" title={cam.rtsp_url}>{cam.rtsp_url}</div>
                 <div className="mt-3 grid grid-cols-4 gap-1.5">
                   <CamBtn icon={Video} label="Live" primary />
                   <CamBtn icon={Move} label="PTZ" disabled={!cam.ptz} />
@@ -94,7 +114,7 @@ function CamerasPage() {
               </div>
             </div>
           ))}
-          {filtered.length === 0 && (
+          {!camsQ.isLoading && filtered.length === 0 && (
             <div className="col-span-full text-center text-sm text-muted-foreground py-10">No cameras match.</div>
           )}
         </div>
