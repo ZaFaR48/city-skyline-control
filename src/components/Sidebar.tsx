@@ -1,8 +1,9 @@
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard, Server, Video, Map as MapIcon, BellRing,
-  BarChart3, Monitor, Network, Send, Workflow, Settings as SettingsIcon, ShieldCheck,
+  BarChart3, Monitor, Network, Send, Workflow, Settings as SettingsIcon, ShieldCheck, LogOut,
 } from "lucide-react";
+import { clearAuth } from "@/lib/auth";
 
 type NavItem = { to: string; label: string; icon: typeof LayoutDashboard; exact?: boolean };
 const NAV: NavItem[] = [
