@@ -22,6 +22,11 @@ const NAV: NavItem[] = [
 
 export function Sidebar() {
   const path = useRouterState({ select: (s) => s.location.pathname });
+  const navigate = useNavigate();
+  function handleLogout() {
+    clearAuth();
+    navigate({ to: "/login", replace: true });
+  }
   return (
     <aside className="hidden md:flex w-60 shrink-0 flex-col border-r border-border bg-panel/60 backdrop-blur-xl">
       <div className="h-16 flex items-center gap-2 px-5 border-b border-border">
