@@ -56,6 +56,10 @@ class StationOut(StationBase):
     class Config: from_attributes = True
 
 
+class StationDetailOut(StationOut):
+    headscale_node: Optional["HeadscaleNodeOut"] = None
+
+
 # ---- Cameras ----
 class CameraBase(BaseModel):
     station_id: int
@@ -94,6 +98,9 @@ class HeadscaleNodeOut(BaseModel):
     last_seen: Optional[datetime]
     station_id: Optional[int]
     class Config: from_attributes = True
+
+
+StationDetailOut.model_rebuild()
 
 
 # ---- Ping ----

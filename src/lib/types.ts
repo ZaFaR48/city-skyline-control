@@ -59,6 +59,10 @@ export interface HeadscaleNode {
   station_id: number | null;
 }
 
+export interface StationDetail extends Station {
+  headscale_node: HeadscaleNode | null;
+}
+
 export interface SummaryOut {
   stations_total: number;
   stations_online: number;

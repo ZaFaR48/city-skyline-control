@@ -4,8 +4,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..deps import get_current_user, require_roles
-from ..models import Role, Station, StationStatus, User
-from ..schemas import StationCreate, StationOut, StationUpdate
+from ..models import HeadscaleNode, Role, Station, StationStatus, User
+from ..schemas import StationCreate, StationDetailOut, StationOut, StationUpdate
 
 router = APIRouter()
 
@@ -43,12 +43,19 @@ async def create_station(data: StationCreate, db: AsyncSession = Depends(get_db)
     return s
 
 
-@router.get("/{station_id}", response_model=StationOut)
+@router.get("/{station_id}", response_model=StationDetailOut)
 async def get_station(station_id: int, db: AsyncSession = Depends(get_db),
                       _: User = Depends(get_current_user)):
     s = await db.get(Station, station_id)
     if not s: raise HTTPException(404, "Station not found")
-    return s
+    node = (await db.execute(
+        select(HeadscaleNode).where(HeadscaleNode.vpn_ip == s.vpn_ip)
+    )).scalar_one_or_none()
+    out = StationDetailOut.model_validate(s)
+    if node:
+        from ..schemas import HeadscaleNodeOut
+        out.headscale_node = HeadscaleNodeOut.model_validate(node)
+    return out
 
 
 @router.patch("/{station_id}", response_model=StationOut,
