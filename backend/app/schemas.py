@@ -100,6 +100,9 @@ class HeadscaleNodeOut(BaseModel):
     class Config: from_attributes = True
 
 
+StationDetailOut.model_rebuild()
+
+
 # ---- Ping ----
 class PingPoint(BaseModel):
     latency_ms: float
