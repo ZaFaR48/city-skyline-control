@@ -56,6 +56,10 @@ class StationOut(StationBase):
     class Config: from_attributes = True
 
 
+class StationDetailOut(StationOut):
+    headscale_node: Optional["HeadscaleNodeOut"] = None
+
+
 # ---- Cameras ----
 class CameraBase(BaseModel):
     station_id: int
