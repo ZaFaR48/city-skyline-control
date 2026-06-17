@@ -63,14 +63,6 @@ export interface StationDetail extends Station {
   headscale_node: HeadscaleNode | null;
 }
 
-  id: number;
-  hostname: string;
-  vpn_ip: string;
-  online: boolean;
-  last_seen: string | null;
-  station_id: number | null;
-}
-
 export interface SummaryOut {
   stations_total: number;
   stations_online: number;
