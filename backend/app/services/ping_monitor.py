@@ -25,7 +25,7 @@ _consecutive_failures: dict[int, int] = {}
 async def _ping_one(station: Station) -> tuple[float, float, bool]:
     try:
         host = await async_ping(station.vpn_ip, count=3, timeout=settings.PING_TIMEOUT_SEC,
-                                privileged=False)
+                                privileged=True)
         return host.avg_rtt, host.packet_loss * 100, host.is_alive
     except Exception:
         return 0.0, 100.0, False

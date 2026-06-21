@@ -22,10 +22,6 @@ def upgrade() -> None:
     severity = sa.Enum("critical", "warning", "info", name="alertseverity")
     atype = sa.Enum("offline_station", "camera_offline", "vpn_lost",
                     "disk_full", "cpu_high", "ram_high", name="alerttype")
-    role.create(op.get_bind(), checkfirst=True)
-    status.create(op.get_bind(), checkfirst=True)
-    severity.create(op.get_bind(), checkfirst=True)
-    atype.create(op.get_bind(), checkfirst=True)
 
     op.create_table("users",
         sa.Column("id", sa.Integer, primary_key=True),
