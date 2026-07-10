@@ -30,3 +30,44 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# City Skyline local/runtime ignores
+frontend/node_modules/
+frontend/.env
+frontend/.env.*
+frontend/*.log
+
+backend/venv/
+backend/.env
+backend/.env.*
+backend/__pycache__/
+backend/**/*.pyc
+
+telegram-bot/venv/
+telegram-bot/.env
+telegram-bot/.env.*
+
+alpr-edge/.venv/
+alpr-edge/.env
+alpr-edge/.env.*
+alpr-edge/data/
+alpr-edge/dist-pilot/
+
+*.log
+.DS_Store
+
+# Global Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Global Node deps
+node_modules/
+
+# Backups / temporary files
+*.bak
+*.backup
+*.tmp
+.cache/
+.tmp/
+tmp/

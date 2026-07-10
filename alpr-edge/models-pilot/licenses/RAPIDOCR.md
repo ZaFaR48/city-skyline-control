@@ -1,0 +1,1 @@
+RapidOCR project: Apache-2.0. OCR model copyright is documented by RapidAI; models copied from rapidocr-onnxruntime 1.4.4 installed wheel for offline station use. Source: https://github.com/RapidAI/RapidOCR

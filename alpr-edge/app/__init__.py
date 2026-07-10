@@ -1,0 +1,1 @@
+"""Edge ALPR MVP package."""

@@ -1,0 +1,1 @@
+SSD-MobileNetV1-12 ONNX Model Zoo mirror. Source: https://huggingface.co/onnxmodelzoo/ssd_mobilenet_v1_12. The model card shows an Apache-2.0 badge and includes upstream license notes; verify before production use.

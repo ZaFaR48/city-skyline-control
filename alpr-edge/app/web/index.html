@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>City Skyline Edge</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>City Skyline Edge</h1>
+        <p>PTZ Preset, Zone and Patrol Designer</p>
+      </div>
+      <div id="status" class="status">Loading</div>
+    </header>
+
+    <main class="layout">
+      <aside class="panel sidebar">
+        <section>
+          <div class="section-title">
+            <h2>Camera Connection</h2>
+            <span id="cameraIndicator" class="status small">Unknown</span>
+          </div>
+          <div id="cameraDetails" class="camera-details">Loading camera status...</div>
+          <div class="mini-actions">
+            <button id="testCamera" type="button">Test Camera</button>
+            <button id="reconnectCamera" type="button">Reconnect</button>
+            <button id="captureCameraSnapshot" type="button">Capture Snapshot</button>
+          </div>
+        </section>
+
+        <section>
+          <div class="section-title">
+            <h2>Presets</h2>
+            <button id="refreshPresets" type="button">Refresh</button>
+          </div>
+          <div id="presetList" class="list"></div>
+        </section>
+
+        <section>
+          <h2>Add Preset</h2>
+          <form id="presetForm" class="stack">
+            <input name="name" required placeholder="Preset name" />
+            <select name="preset_type">
+              <option value="home">Home</option>
+              <option value="entrance">Entrance</option>
+              <option value="parking" selected>Parking</option>
+              <option value="exit">Exit</option>
+              <option value="no_parking">No parking</option>
+              <option value="disabled">Disabled</option>
+              <option value="service">Service</option>
+            </select>
+            <input name="description" placeholder="Description" />
+            <div class="grid-two">
+              <label>Settle ms<input name="settle_time_ms" type="number" min="0" value="1500" /></label>
+              <label>Dwell ms<input name="dwell_time_ms" type="number" min="0" value="5000" /></label>
+            </div>
+            <button type="submit">Add preset</button>
+          </form>
+        </section>
+
+        <section>
+          <h2>Snapshot</h2>
+          <form id="snapshotForm" class="stack">
+            <input id="snapshotFile" type="file" accept="image/jpeg,image/png" />
+            <button type="submit">Upload snapshot</button>
+            <button id="captureSnapshot" type="button">Capture RTSP frame for preset</button>
+          </form>
+        </section>
+      </aside>
+
+      <section class="workspace">
+        <section class="panel">
+          <div class="section-title">
+            <h2>Runtime Monitor</h2>
+            <span id="runtimeIndicator" class="status small">Unknown</span>
+          </div>
+          <div id="runtimeSummary" class="metric-grid"></div>
+          <div id="paymentNotice" class="notice"></div>
+          <div class="mini-actions">
+            <button id="startRuntime" type="button">Start runtime</button>
+            <button id="stopRuntime" type="button">Stop runtime</button>
+            <button id="refreshRuntime" type="button">Refresh runtime</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="section-title">
+            <h2>Active Vehicles</h2>
+            <button id="refreshSessions" type="button">Refresh</button>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Plate</th>
+                  <th>Slot</th>
+                  <th>First seen</th>
+                  <th>Duration</th>
+                  <th>Status</th>
+                  <th>Amount</th>
+                  <th>Payment</th>
+                </tr>
+              </thead>
+              <tbody id="activeVehiclesTable"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="section-title">
+            <h2>ALPR Pilot</h2>
+            <span id="alprIndicator" class="status small">Unknown</span>
+          </div>
+          <p class="notice">Pilot recognition — Tajik plate model still requires real local dataset validation.</p>
+          <div id="alprSummary" class="metric-grid"></div>
+          <div class="mini-actions">
+            <button id="processLatestSnapshot" type="button">Process Latest Snapshot</button>
+            <label class="file-action">Upload Test Image<input id="alprTestImage" type="file" accept="image/jpeg,image/png" /></label>
+            <button id="refreshAlpr" type="button">Refresh ALPR</button>
+          </div>
+          <div class="grid-main">
+            <section>
+              <h2>Latest Observations</h2>
+              <div id="alprObservations" class="list compact"></div>
+            </section>
+            <section>
+              <h2>Review Queue</h2>
+              <div id="alprReviewQueue" class="list compact"></div>
+            </section>
+          </div>
+        </section>
+
+        <div class="panel editor-head">
+          <div>
+            <h2 id="selectedPresetTitle">No preset selected</h2>
+            <p id="selectedPresetMeta">Select or add a preset to begin calibration.</p>
+          </div>
+          <div class="actions">
+            <button id="setHome" type="button">Set Home</button>
+            <button id="gotoPreset" type="button">Dry-run Goto</button>
+            <button id="deletePreset" class="danger" type="button">Delete</button>
+          </div>
+        </div>
+
+        <div class="panel canvas-panel">
+          <div class="canvas-toolbar">
+            <select id="drawMode">
+              <option value="zone">Zone polygon</option>
+              <option value="slot">Parking slot</option>
+            </select>
+            <input id="polygonLabel" placeholder="Label or slot code" />
+            <select id="zoneType">
+              <option value="paid_parking">Paid parking</option>
+              <option value="no_parking">No parking</option>
+              <option value="disabled_only">Disabled only</option>
+              <option value="service">Service</option>
+              <option value="entrance">Entrance</option>
+              <option value="exit">Exit</option>
+              <option value="lane">Lane</option>
+              <option value="ignore">Ignore</option>
+            </select>
+            <button id="closePolygon" type="button">Close</button>
+            <button id="undoPoint" type="button">Undo</button>
+            <button id="clearPolygon" type="button">Clear</button>
+            <button id="savePolygon" type="button">Save</button>
+          </div>
+          <div class="snapshot-wrap">
+            <img id="snapshotImage" alt="" />
+            <canvas id="polygonCanvas"></canvas>
+            <div id="snapshotEmpty" class="empty">Upload or capture a reference snapshot.</div>
+          </div>
+        </div>
+
+        <div class="grid-main">
+          <section class="panel">
+            <div class="section-title">
+              <h2>Zones</h2>
+              <button id="refreshZones" type="button">Refresh</button>
+            </div>
+            <div id="zoneList" class="list compact"></div>
+          </section>
+
+          <section class="panel">
+            <div class="section-title">
+              <h2>Parking Slots</h2>
+              <button id="refreshSlots" type="button">Refresh</button>
+            </div>
+            <div id="slotList" class="list compact"></div>
+          </section>
+        </div>
+
+        <section class="panel">
+          <div class="section-title">
+            <h2>Patrol Plan</h2>
+            <button id="savePatrol" type="button">Save patrol</button>
+          </div>
+          <div id="patrolList" class="list compact"></div>
+          <div id="patrolSummary" class="notice"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Messages</h2>
+          <pre id="messages"></pre>
+        </section>
+      </section>
+    </main>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>

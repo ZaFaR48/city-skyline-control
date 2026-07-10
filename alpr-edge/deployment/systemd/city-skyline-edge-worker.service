@@ -1,0 +1,34 @@
+[Unit]
+Description=City Skyline Edge Parking Session Worker
+Documentation=file:/opt/city-skyline-edge/docs/UBUNTU_EDGE_DEPLOYMENT.md
+After=network-online.target
+Wants=network-online.target
+PartOf=city-skyline-edge.target
+
+[Service]
+Type=simple
+User=cityedge
+Group=cityedge
+WorkingDirectory=/opt/city-skyline-edge
+EnvironmentFile=/etc/city-skyline-edge/edge.env
+ExecStart=/opt/city-skyline-edge/.venv/bin/python -m app.runtime.worker
+Restart=on-failure
+RestartSec=10
+KillSignal=SIGTERM
+TimeoutStopSec=30
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/city-skyline-edge
+ReadOnlyPaths=/etc/city-skyline-edge
+CapabilityBoundingSet=
+LockPersonality=true
+MemoryDenyWriteExecute=false
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=city-skyline-edge.target

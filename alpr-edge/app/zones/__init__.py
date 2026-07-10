@@ -1,0 +1,1 @@
+"""Parking zone geometry domain."""

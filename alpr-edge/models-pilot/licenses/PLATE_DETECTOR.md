@@ -1,0 +1,1 @@
+No dedicated Tajik plate detector is included in this pilot pack. The application uses a real OpenCV hybrid geometric/OCR plate candidate detector until a licensed Tajik-specific detector is trained and verified.

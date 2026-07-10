@@ -1,0 +1,7 @@
+[Unit]
+Description=City Skyline Edge API and Parking Worker
+Wants=city-skyline-edge-api.service city-skyline-edge-worker.service
+After=network-online.target
+
+[Install]
+WantedBy=multi-user.target
