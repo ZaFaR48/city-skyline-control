@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import asc, desc, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -29,6 +27,7 @@ from ..schemas import StationCreate, StationDetailOut, StationListOut, StationOu
 from ..services.audit import add_audit
 from ..services.ping_monitor import ping_station
 from ..services.station_views import serialize_stations
+from ..services.station_visibility import production_station_filter
 
 
 router = APIRouter()
@@ -49,8 +48,9 @@ async def list_stations(
     direction: str = Query("asc", pattern=r"^(asc|desc)$"),
     limit: int = Query(25, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    approval: str = Query("approved", pattern=r"^(pending|approved|all)$"),
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
     district = aliased(OperationalRegion)
     city = aliased(OperationalRegion)
@@ -68,6 +68,12 @@ async def list_stations(
         .options(selectinload(Station.city), selectinload(Station.district))
     )
     filters = []
+    if user.role != Role.admin.value and approval != "approved":
+        raise HTTPException(403, "Only administrators may view pending stations")
+    if approval == "approved":
+        filters.append(production_station_filter())
+    elif approval == "pending":
+        filters.append(Station.approved_at.is_(None))
     if q and q.strip():
         like = f"%{q.strip()}%"
         filters.append(
@@ -130,9 +136,6 @@ async def create_station(
 ):
     await _validate_regions(db, data.city_id, data.district_id)
     station = Station(**data.model_dump())
-    if user.role == Role.admin.value:
-        station.approved_at = datetime.now(timezone.utc)
-        station.approved_by = user.id
     db.add(station)
     try:
         await db.flush()
@@ -157,9 +160,13 @@ async def create_station(
 async def get_station(
     station_id: int,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
     station = await _load_station(db, station_id)
+    if user.role != Role.admin.value and not (
+        station.approved_at is not None and station.is_active and not station.is_archived
+    ):
+        raise HTTPException(404, "Station not found")
     base = (await serialize_stations(db, [station]))[0]
     node = (
         await db.execute(select(HeadscaleNode).where(HeadscaleNode.station_id == station_id))

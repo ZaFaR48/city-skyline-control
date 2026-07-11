@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..database import get_db
 from ..deps import get_current_user, require_roles
 from ..models import Role, RustdeskDevice, Station, User
+from ..services.station_visibility import production_station_filter
 
 router = APIRouter()
 
@@ -13,7 +14,9 @@ router = APIRouter()
 async def list_devices(db: AsyncSession = Depends(get_db),
                        _: User = Depends(get_current_user)):
     rows = (await db.execute(
-        select(RustdeskDevice, Station).join(Station, RustdeskDevice.station_id == Station.id)
+        select(RustdeskDevice, Station)
+        .join(Station, RustdeskDevice.station_id == Station.id)
+        .where(production_station_filter())
     )).all()
     return [{
         "station_code": s.station_code, "station": s.name, "district_id": s.district_id, "vpn_ip": s.vpn_ip,

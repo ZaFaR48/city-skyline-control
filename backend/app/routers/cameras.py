@@ -4,8 +4,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
 from ..deps import get_current_user, require_roles
-from ..models import Camera, Role, User
+from ..models import Camera, Role, Station, User
 from ..schemas import CameraCreate, CameraOut
+from ..services.station_visibility import production_station_filter
 
 router = APIRouter()
 
@@ -14,7 +15,7 @@ router = APIRouter()
 async def list_cameras(station_id: int | None = None,
                        db: AsyncSession = Depends(get_db),
                        _: User = Depends(get_current_user)):
-    stmt = select(Camera)
+    stmt = select(Camera).join(Station, Camera.station_id == Station.id).where(production_station_filter())
     if station_id:
         stmt = stmt.where(Camera.station_id == station_id)
     return (await db.execute(stmt.order_by(Camera.id))).scalars().all()

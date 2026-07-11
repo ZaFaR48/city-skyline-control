@@ -21,9 +21,9 @@ from app.services.station_status import StationStatusResolver
 from app.services.station_views import serialize_stations
 
 
-async def station(db, code: str, status: str = "unknown") -> Station:
+async def station(db, code: str, status: str = "unknown", *, approved: bool = True) -> Station:
     city = (await db.execute(select(OperationalRegion).where(OperationalRegion.code == "dushanbe"))).scalar_one()
-    row = Station(station_code=code, name=f"Station {code}", city_id=city.id, address="", status=status, is_active=True, is_archived=False, vpn_ip=f"100.100.0.{int(code[-2:])}")
+    row = Station(station_code=code, name=f"Station {code}", city_id=city.id, address="", status=status, is_active=True, is_archived=False, vpn_ip=f"100.100.0.{int(code[-2:])}", approved_at=datetime.now(timezone.utc) if approved else None)
     db.add(row)
     await db.flush()
     return row
@@ -113,3 +113,12 @@ async def test_dashboard_arithmetic_and_missing_telemetry(db):
     assert summary.total_stations == summary.online_stations + summary.offline_stations + summary.degraded_stations + summary.unknown_stations
     rendered = (await serialize_stations(db, [rows[-1]]))[0]
     assert rendered.cpu is None and rendered.ram is None and rendered.disk is None
+
+
+@pytest.mark.asyncio
+async def test_unapproved_station_is_excluded_and_approved_station_is_included(db):
+    pending = await station(db, "91021", approved=False)
+    approved = await station(db, "91022", approved=True)
+    summary = await build_dashboard_summary(db)
+    assert summary.total_stations == 1
+    assert approved.id != pending.id

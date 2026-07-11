@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..database import get_db
-from ..deps import get_current_user, require_roles
+from ..deps import require_roles
 from ..models import ApprovalStatus, DeviceType, HeadscaleNode, Role, Station, User
 from ..schemas import HeadscaleApproveConfirmIn, HeadscaleApproveIn, HeadscaleLinkIn, HeadscaleNodeOut
 from ..services.audit import add_audit
@@ -27,7 +27,7 @@ async def list_nodes(
     online: bool | None = None,
     linked: bool | None = None,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(get_current_user),
+    _: User = Depends(require_roles(Role.admin)),
 ):
     stmt = select(HeadscaleNode)
     if approval_status:

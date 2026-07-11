@@ -18,6 +18,7 @@ from ..models import (
     StationStatus,
 )
 from ..schemas import AttentionStation, DashboardSummaryOut, DistrictHealth
+from .station_visibility import production_station_filter
 
 
 PILOT_DISTRICT_CODES = ("ismoili-somoni", "shohmansur", "sino", "firdavsi")
@@ -30,8 +31,7 @@ async def build_dashboard_summary(db: AsyncSession) -> DashboardSummaryOut:
             .join(OperationalRegion, Station.city_id == OperationalRegion.id)
             .where(
                 OperationalRegion.code == "dushanbe",
-                Station.is_active.is_(True),
-                Station.is_archived.is_(False),
+                production_station_filter(),
             )
             .options(selectinload(Station.district))
         )
@@ -81,8 +81,7 @@ async def build_dashboard_summary(db: AsyncSession) -> DashboardSummaryOut:
             .where(
                 HeadscaleNode.approval_status == ApprovalStatus.approved.value,
                 HeadscaleNode.device_type == DeviceType.station.value,
-                Station.is_active.is_(True),
-                Station.is_archived.is_(False),
+                production_station_filter(),
             )
         )
     ).scalar_one()
@@ -126,7 +125,11 @@ async def build_dashboard_summary(db: AsyncSession) -> DashboardSummaryOut:
 
     recent_alerts = (
         await db.execute(
-            select(Alert).where(Alert.resolved_at.is_(None)).order_by(Alert.created_at.desc()).limit(6)
+            select(Alert)
+            .join(Station, Alert.station_id == Station.id)
+            .where(Alert.resolved_at.is_(None), production_station_filter())
+            .order_by(Alert.created_at.desc())
+            .limit(6)
         )
     ).scalars().all()
     now = datetime.now(timezone.utc)

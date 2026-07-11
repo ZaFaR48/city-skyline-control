@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from ..models import OperationalRegion, Station, StationStatus, StationStatusEvent
 from ..schemas import ReportStationRow
+from .station_visibility import production_station_filter
 
 
 async def build_uptime_report(
@@ -28,7 +29,7 @@ async def build_uptime_report(
     station_stmt = (
         select(Station)
         .join(OperationalRegion, Station.city_id == OperationalRegion.id)
-        .where(OperationalRegion.code == "dushanbe", Station.is_archived.is_(False))
+        .where(OperationalRegion.code == "dushanbe", production_station_filter())
         .options(selectinload(Station.district))
     )
     if station_id:

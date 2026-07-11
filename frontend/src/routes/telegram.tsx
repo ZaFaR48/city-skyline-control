@@ -1,21 +1,34 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
-import { Check, X } from "lucide-react";
+import { AlertTriangle, Check, Link2, X } from "lucide-react";
 import { Topbar } from "@/components/Topbar";
-import { getRegistrations, reviewRegistration } from "@/lib/api";
+import {
+  getRegistrations,
+  getUsers,
+  linkRegistrationToExistingUser,
+  previewExistingUserLink,
+  reviewRegistration,
+} from "@/lib/api";
 import { getStoredUser } from "@/lib/auth";
-import type { RegistrationRequest, Role, User } from "@/lib/types";
+import type { RegistrationRequest, Role, TelegramLinkPreview, User } from "@/lib/types";
 
 export const Route = createFileRoute("/telegram")({ component: TelegramPage });
 function TelegramPage() {
   const user = getStoredUser<User>();
   const [rows, setRows] = useState<RegistrationRequest[]>([]);
+  const [systemUsers, setSystemUsers] = useState<User[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [roles, setRoles] = useState<Record<number, Role>>({});
+  const [selectedUsers, setSelectedUsers] = useState<Record<number, string>>({});
+  const [linkPreview, setLinkPreview] = useState<TelegramLinkPreview | null>(null);
+  const [confirmation, setConfirmation] = useState("");
   const load = useCallback(() => {
     if (user?.role !== "admin") return;
-    getRegistrations()
-      .then(setRows)
+    Promise.all([getRegistrations(), getUsers()])
+      .then(([registrations, users]) => {
+        setRows(registrations);
+        setSystemUsers(users);
+      })
       .catch((err) =>
         setError(err instanceof Error ? err.message : "Registration requests unavailable"),
       );
@@ -35,6 +48,35 @@ function TelegramPage() {
       setError(err instanceof Error ? err.message : "Review failed");
     }
   }
+  async function previewLink(registrationId: number) {
+    const userId = Number(selectedUsers[registrationId]);
+    if (!userId) {
+      setError("Select an existing system user first");
+      return;
+    }
+    try {
+      setLinkPreview(await previewExistingUserLink(registrationId, userId));
+      setConfirmation("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Existing-user link preview failed");
+    }
+  }
+  async function applyLink() {
+    if (!linkPreview?.preview_token || confirmation !== linkPreview.confirmation_phrase) return;
+    try {
+      await linkRegistrationToExistingUser(
+        linkPreview.registration_id,
+        linkPreview.user_id,
+        linkPreview.preview_token,
+        confirmation,
+      );
+      setLinkPreview(null);
+      setConfirmation("");
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Existing-user link failed");
+    }
+  }
   return (
     <>
       <Topbar title="Telegram Access" subtitle="Registration review and role assignment" />
@@ -47,11 +89,12 @@ function TelegramPage() {
           <>
             {error && <div className="glass p-4 mb-4 text-destructive">{error}</div>}
             <div className="glass rounded-xl overflow-x-auto">
-              <table className="w-full min-w-[900px] text-sm">
+              <table className="w-full min-w-[1200px] text-sm">
                 <thead className="bg-panel text-left text-xs uppercase text-muted-foreground">
                   <tr>
                     <th className="p-3">Telegram ID</th>
                     <th>User</th>
+                    <th>Existing user link</th>
                     <th>Requested</th>
                     <th>Status</th>
                     <th>Role</th>
@@ -71,6 +114,38 @@ function TelegramPage() {
                         <div className="text-xs text-muted-foreground">
                           {row.telegram_username ? `@${row.telegram_username}` : "—"}
                         </div>
+                      </td>
+                      <td>
+                        {row.status === "pending" ? (
+                          <div className="flex items-center gap-2 py-2">
+                            <select
+                              value={selectedUsers[row.id] ?? ""}
+                              onChange={(event) =>
+                                setSelectedUsers((current) => ({
+                                  ...current,
+                                  [row.id]: event.target.value,
+                                }))
+                              }
+                              className="h-8 max-w-[220px] bg-input border border-border rounded"
+                            >
+                              <option value="">Select existing user…</option>
+                              {systemUsers.map((systemUser) => (
+                                <option key={systemUser.id} value={systemUser.id}>
+                                  {systemUser.username} · {systemUser.role.toUpperCase()} ·{" "}
+                                  {systemUser.is_active ? "active" : "inactive"}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              onClick={() => previewLink(row.id)}
+                              className="h-8 px-2 inline-flex items-center gap-1 border border-primary/40 text-primary rounded"
+                            >
+                              <Link2 className="size-3" /> Link to existing user
+                            </button>
+                          </div>
+                        ) : (
+                          "—"
+                        )}
                       </td>
                       <td>{new Date(row.requested_at).toLocaleString()}</td>
                       <td className="capitalize">{row.status.replaceAll("_", " ")}</td>
@@ -116,7 +191,7 @@ function TelegramPage() {
                   ))}
                   {rows.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="py-14 text-center text-muted-foreground">
+                      <td colSpan={7} className="py-14 text-center text-muted-foreground">
                         No registration requests.
                       </td>
                     </tr>
@@ -124,9 +199,84 @@ function TelegramPage() {
                 </tbody>
               </table>
             </div>
+            {linkPreview && (
+              <div className="fixed inset-0 z-50 bg-black/60 grid place-items-center p-4">
+                <div className="glass bg-background rounded-xl p-5 w-full max-w-xl">
+                  <h2 className="font-semibold">Link Telegram to existing user</h2>
+                  <p className="text-xs text-muted-foreground">
+                    This does not create a user, change a password, or change a role.
+                  </p>
+                  <dl className="grid grid-cols-2 gap-3 text-sm my-5">
+                    <PreviewValue
+                      label="Telegram ID"
+                      value={String(linkPreview.telegram_user_id)}
+                    />
+                    <PreviewValue
+                      label="Telegram username"
+                      value={
+                        linkPreview.telegram_username ? `@${linkPreview.telegram_username}` : "—"
+                      }
+                    />
+                    <PreviewValue label="System username" value={linkPreview.username} />
+                    <PreviewValue label="Current role" value={linkPreview.role.toUpperCase()} />
+                    <PreviewValue
+                      label="Active status"
+                      value={linkPreview.is_active ? "Active" : "Inactive"}
+                    />
+                  </dl>
+                  {linkPreview.warning && (
+                    <div className="mb-4 p-3 border border-warning/40 text-warning rounded text-sm flex gap-2">
+                      <AlertTriangle className="size-4 shrink-0" /> {linkPreview.warning}
+                    </div>
+                  )}
+                  {linkPreview.errors.map((item) => (
+                    <p key={item} className="text-sm text-destructive">
+                      {item}
+                    </p>
+                  ))}
+                  {linkPreview.valid && (
+                    <label className="block text-xs">
+                      Type <span className="font-mono">{linkPreview.confirmation_phrase}</span> to
+                      confirm
+                      <input
+                        value={confirmation}
+                        onChange={(event) => setConfirmation(event.target.value)}
+                        className="block mt-1 w-full h-9 px-3 bg-input border border-border rounded"
+                      />
+                    </label>
+                  )}
+                  <div className="mt-4 flex justify-end gap-2">
+                    <button
+                      onClick={() => setLinkPreview(null)}
+                      className="h-9 px-4 border border-border rounded"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      disabled={
+                        !linkPreview.valid || confirmation !== linkPreview.confirmation_phrase
+                      }
+                      onClick={applyLink}
+                      className="h-9 px-4 border border-primary/40 text-primary rounded disabled:opacity-40"
+                    >
+                      Link to existing user
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         )}
       </div>
     </>
+  );
+}
+
+function PreviewValue({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd>{value}</dd>
+    </div>
   );
 }

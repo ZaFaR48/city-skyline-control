@@ -37,6 +37,7 @@ class UserOut(ORMModel):
     username: str
     email: EmailStr
     role: Role
+    is_active: bool
 
 
 class RegionOut(ORMModel):
@@ -115,9 +116,12 @@ class StationOut(BaseModel):
     telemetry_at: datetime | None
     is_active: bool
     is_archived: bool
+    approved_at: datetime | None
+    approved_by: int | None
     monitoring_configured: bool
     headscale_linked: bool
     headscale_hostname: str | None
+    headscale_approval_status: ApprovalStatus | None = None
     cameras_total: int
     cameras_online: int
     active_alerts: int
@@ -350,6 +354,30 @@ class RegistrationStatusOut(BaseModel):
     expires_at: datetime | None = None
 
 
+class TelegramLinkPreviewIn(BaseModel):
+    user_id: int
+
+
+class TelegramLinkApplyIn(TelegramLinkPreviewIn):
+    preview_token: str
+    confirmation: str
+
+
+class TelegramLinkPreviewOut(BaseModel):
+    registration_id: int
+    telegram_user_id: int
+    telegram_username: str | None
+    user_id: int
+    username: str
+    role: Role
+    is_active: bool
+    warning: str | None
+    confirmation_phrase: str
+    valid: bool
+    errors: list[str]
+    preview_token: str | None
+
+
 class ActivationIn(BaseModel):
     code: str = Field(min_length=20, max_length=256)
     password: str = Field(min_length=12, max_length=256)
@@ -371,6 +399,32 @@ class AuditLogOut(ORMModel):
 class DistrictAssignmentIn(BaseModel):
     station_code: str = Field(min_length=1, max_length=32)
     district: str = Field(min_length=1, max_length=128)
+
+
+class StationApprovalPreviewOut(BaseModel):
+    station_id: int
+    station_code: str
+    station_name: str
+    district: str | None
+    address: str
+    vpn_ip: str | None
+    local_ip: str | None
+    headscale_hostname: str | None
+    headscale_approval_status: ApprovalStatus | None
+    monitoring_status: StationStatus
+    monitoring_ready: bool
+    warning: str | None
+    production_approved: bool
+    action: Literal["approve", "revoke"]
+    confirmation_phrase: str
+    valid: bool
+    errors: list[str]
+    preview_token: str | None
+
+
+class StationApprovalApplyIn(BaseModel):
+    preview_token: str
+    confirmation: str
 
 
 class DistrictPreviewIn(BaseModel):

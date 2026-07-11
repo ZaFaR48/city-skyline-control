@@ -14,10 +14,12 @@ import type {
   RegistrationRequest,
   Role,
   Station,
+  StationApprovalPreview,
   StationDetail,
   StationList,
   UptimeReportRow,
   User,
+  TelegramLinkPreview,
 } from "./types";
 
 export interface LoginResponse {
@@ -138,11 +140,34 @@ export const getUptimeReport = (start: string, end: string, districtId?: number)
     `/api/reports/uptime${query({ start, end, district_id: districtId })}`,
   );
 export const getRegistrations = () => apiFetch<RegistrationRequest[]>("/api/registrations");
+export const getUsers = () => apiFetch<User[]>("/api/users");
 export const reviewRegistration = (id: number, action: string, role?: Role) =>
   apiFetch<{ status: string }>(`/api/registrations/${id}/review`, {
     method: "POST",
     body: JSON.stringify({ action, role: role ?? null }),
   });
+export const previewExistingUserLink = (registrationId: number, userId: number) =>
+  apiFetch<TelegramLinkPreview>(`/api/registrations/${registrationId}/link-preview`, {
+    method: "POST",
+    body: JSON.stringify({ user_id: userId }),
+  });
+export const linkRegistrationToExistingUser = (
+  registrationId: number,
+  userId: number,
+  previewToken: string,
+  confirmation: string,
+) =>
+  apiFetch<{ status: string; user_id: number; notification_sent: boolean }>(
+    `/api/registrations/${registrationId}/link-existing`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        user_id: userId,
+        preview_token: previewToken,
+        confirmation,
+      }),
+    },
+  );
 export const activateAccount = (code: string, password: string) =>
   apiFetch<{ status: string; username: string }>(
     "/api/registrations/activate",
@@ -162,6 +187,26 @@ export const getRustdeskDevices = () =>
 
 export const getDistrictOnboardingStations = () =>
   apiFetch<Station[]>("/api/onboarding/districts/stations");
+export const getStationApprovalInventory = (approval: "pending" | "approved" | "all") =>
+  apiFetch<Station[]>(`/api/onboarding/stations${query({ approval })}`);
+export const previewStationApproval = (stationId: number, action: "approve" | "revoke") =>
+  apiFetch<StationApprovalPreview>(
+    `/api/onboarding/stations/${stationId}/${action === "approve" ? "approval-preview" : "revocation-preview"}`,
+    { method: "POST" },
+  );
+export const applyStationApproval = (
+  stationId: number,
+  action: "approve" | "revoke",
+  previewToken: string,
+  confirmation: string,
+) =>
+  apiFetch<Station>(
+    `/api/onboarding/stations/${stationId}/${action === "approve" ? "approve" : "revoke"}`,
+    {
+      method: "POST",
+      body: JSON.stringify({ preview_token: previewToken, confirmation }),
+    },
+  );
 export const previewDistrictAssignments = (assignments: DistrictAssignment[]) =>
   apiFetch<DistrictPreview>("/api/onboarding/districts/preview", {
     method: "POST",

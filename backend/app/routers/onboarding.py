@@ -37,6 +37,8 @@ from ..schemas import (
     DuplicateVpnStation,
     OnboardingValidationError,
     StationOut,
+    StationApprovalApplyIn,
+    StationApprovalPreviewOut,
 )
 from ..services.audit import add_audit
 from ..services.confirmation_tokens import create_confirmation_token, verify_confirmation_token
@@ -46,6 +48,120 @@ from ..services.station_views import serialize_stations
 router = APIRouter()
 MAX_CSV_BYTES = 1_000_000
 SUPPORTED_DISTRICT_CODES = {"ismoili-somoni", "shohmansur", "sino", "firdavsi"}
+
+
+@router.get("/stations", response_model=list[StationOut])
+async def station_approval_inventory(
+    approval: str = "pending",
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(Role.admin)),
+):
+    if approval not in {"pending", "approved", "all"}:
+        raise HTTPException(422, "approval must be pending, approved, or all")
+    stmt = (
+        select(Station)
+        .join(OperationalRegion, Station.city_id == OperationalRegion.id)
+        .where(
+            OperationalRegion.code == "dushanbe",
+            Station.is_active.is_(True),
+            Station.is_archived.is_(False),
+        )
+        .options(selectinload(Station.city), selectinload(Station.district))
+    )
+    if approval == "pending":
+        stmt = stmt.where(Station.approved_at.is_(None))
+    elif approval == "approved":
+        stmt = stmt.where(Station.approved_at.is_not(None))
+    stations = (await db.execute(stmt.order_by(Station.station_code))).scalars().all()
+    return await serialize_stations(db, list(stations))
+
+
+@router.post("/stations/{station_id}/approval-preview", response_model=StationApprovalPreviewOut)
+async def preview_station_approval(
+    station_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(Role.admin)),
+):
+    station = await _onboarding_station(db, station_id)
+    return await _station_approval_preview(db, station, "approve")
+
+
+@router.post("/stations/{station_id}/approve", response_model=StationOut)
+async def approve_station_for_production(
+    station_id: int,
+    data: StationApprovalApplyIn,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_roles(Role.admin)),
+):
+    station = await _onboarding_station(db, station_id)
+    preview = await _station_approval_preview(db, station, "approve")
+    if not preview.valid or not preview.preview_token:
+        raise HTTPException(422, preview.errors)
+    if data.confirmation != preview.confirmation_phrase:
+        raise HTTPException(422, "Explicit station confirmation is required")
+    if not verify_confirmation_token(data.preview_token, "station-approval", _station_approval_payload(station, preview, "approve")):
+        raise HTTPException(409, "Approval preview expired or station readiness changed; preview again")
+    before = {"approved_at": station.approved_at, "approved_by": station.approved_by}
+    station.approved_at = datetime.now(timezone.utc)
+    station.approved_by = user.id
+    add_audit(
+        db,
+        action="station.production_approve",
+        entity_type="station",
+        entity_id=station.id,
+        actor=user,
+        before=before,
+        after={"approved_at": station.approved_at, "approved_by": station.approved_by},
+        request=request,
+    )
+    await db.commit()
+    station = await _onboarding_station(db, station_id)
+    return (await serialize_stations(db, [station]))[0]
+
+
+@router.post("/stations/{station_id}/revocation-preview", response_model=StationApprovalPreviewOut)
+async def preview_station_revocation(
+    station_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(Role.admin)),
+):
+    station = await _onboarding_station(db, station_id)
+    return await _station_approval_preview(db, station, "revoke")
+
+
+@router.post("/stations/{station_id}/revoke", response_model=StationOut)
+async def revoke_station_from_production(
+    station_id: int,
+    data: StationApprovalApplyIn,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_roles(Role.admin)),
+):
+    station = await _onboarding_station(db, station_id)
+    preview = await _station_approval_preview(db, station, "revoke")
+    if not preview.valid or not preview.preview_token:
+        raise HTTPException(422, preview.errors)
+    if data.confirmation != preview.confirmation_phrase:
+        raise HTTPException(422, "Explicit station confirmation is required")
+    if not verify_confirmation_token(data.preview_token, "station-revocation", _station_approval_payload(station, preview, "revoke")):
+        raise HTTPException(409, "Revocation preview expired or station changed; preview again")
+    before = {"approved_at": station.approved_at, "approved_by": station.approved_by}
+    station.approved_at = None
+    station.approved_by = None
+    add_audit(
+        db,
+        action="station.production_revoke",
+        entity_type="station",
+        entity_id=station.id,
+        actor=user,
+        before=before,
+        after={"approved_at": None, "approved_by": None},
+        request=request,
+    )
+    await db.commit()
+    station = await _onboarding_station(db, station_id)
+    return (await serialize_stations(db, [station]))[0]
 
 
 @router.get("/districts/stations", response_model=list[StationOut])
@@ -384,6 +500,99 @@ async def apply_duplicate_alert_resolution(
     )
     await db.commit()
     return {"canonical_alert_id": alerts[0].id, "resolved": len(alerts) - 1}
+
+
+async def _onboarding_station(db: AsyncSession, station_id: int) -> Station:
+    station = (
+        await db.execute(
+            select(Station)
+            .where(Station.id == station_id)
+            .options(selectinload(Station.city), selectinload(Station.district))
+        )
+    ).scalar_one_or_none()
+    if not station or station.is_archived or not station.is_active or station.city.code != "dushanbe":
+        raise HTTPException(404, "Active Dushanbe station not found")
+    return station
+
+
+async def _station_approval_preview(
+    db: AsyncSession,
+    station: Station,
+    action: str,
+) -> StationApprovalPreviewOut:
+    node = (
+        await db.execute(select(HeadscaleNode).where(HeadscaleNode.station_id == station.id))
+    ).scalar_one_or_none()
+    verified_district = bool(
+        station.district
+        and station.district.region_type == "district"
+        and station.district.code in SUPPORTED_DISTRICT_CODES
+        and station.district.parent_id == station.city_id
+    )
+    monitoring_ready = bool(
+        station.vpn_ip
+        and node
+        and node.device_type == DeviceType.station.value
+        and node.approval_status == ApprovalStatus.approved.value
+    )
+    errors: list[str] = []
+    if action == "approve":
+        if station.approved_at is not None:
+            errors.append("Station is already approved for production")
+        if not verified_district:
+            errors.append("A verified Dushanbe district is required before approval")
+        confirmation_phrase = f"APPROVE STATION {station.station_code}"
+        purpose = "station-approval"
+    else:
+        if station.approved_at is None:
+            errors.append("Station is not currently approved for production")
+        confirmation_phrase = f"REMOVE STATION {station.station_code} FROM PRODUCTION"
+        purpose = "station-revocation"
+    preview = StationApprovalPreviewOut(
+        station_id=station.id,
+        station_code=station.station_code,
+        station_name=station.name,
+        district=station.district.name if station.district else None,
+        address=station.address,
+        vpn_ip=station.vpn_ip,
+        local_ip=station.local_ip,
+        headscale_hostname=node.hostname if node else None,
+        headscale_approval_status=node.approval_status if node else None,
+        monitoring_status=station.status,
+        monitoring_ready=monitoring_ready,
+        warning=None if monitoring_ready else "Monitoring is not configured; station will appear as UNKNOWN.",
+        production_approved=station.approved_at is not None,
+        action=action,
+        confirmation_phrase=confirmation_phrase,
+        valid=not errors,
+        errors=errors,
+        preview_token=None,
+    )
+    if preview.valid:
+        preview.preview_token = create_confirmation_token(
+            purpose,
+            _station_approval_payload(station, preview, action),
+        )
+    return preview
+
+
+def _station_approval_payload(
+    station: Station,
+    preview: StationApprovalPreviewOut,
+    action: str,
+) -> dict[str, object]:
+    return {
+        "station_id": station.id,
+        "station_code": station.station_code,
+        "action": action,
+        "approved_at": station.approved_at,
+        "approved_by": station.approved_by,
+        "district_id": station.district_id,
+        "vpn_ip": station.vpn_ip,
+        "headscale_hostname": preview.headscale_hostname,
+        "headscale_approval_status": preview.headscale_approval_status,
+        "monitoring_ready": preview.monitoring_ready,
+    }
 
 
 async def _district_preview(db: AsyncSession, assignments: list[DistrictAssignmentIn]) -> DistrictPreviewOut:

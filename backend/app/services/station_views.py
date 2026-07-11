@@ -54,11 +54,7 @@ async def serialize_stations(db: AsyncSession, stations: list[Station]) -> list[
     ).all()
     nodes = (
         await db.execute(
-            select(HeadscaleNode).where(
-                HeadscaleNode.station_id.in_(ids),
-                HeadscaleNode.approval_status == ApprovalStatus.approved.value,
-                HeadscaleNode.device_type == DeviceType.station.value,
-            )
+            select(HeadscaleNode).where(HeadscaleNode.station_id.in_(ids))
         )
     ).scalars().all()
     camera_counts = {row[0]: (row[1], row[2]) for row in camera_rows}
@@ -69,6 +65,13 @@ async def serialize_stations(db: AsyncSession, stations: list[Station]) -> list[
     for station in stations:
         camera_total, camera_online = camera_counts.get(station.id, (0, 0))
         node = node_by_station.get(station.id)
+        monitoring_node = (
+            node
+            if node
+            and node.approval_status == ApprovalStatus.approved.value
+            and node.device_type == DeviceType.station.value
+            else None
+        )
         output.append(
             StationOut(
                 id=station.id,
@@ -96,9 +99,12 @@ async def serialize_stations(db: AsyncSession, stations: list[Station]) -> list[
                 telemetry_at=station.telemetry_at,
                 is_active=station.is_active,
                 is_archived=station.is_archived,
-                monitoring_configured=bool(station.vpn_ip and node),
-                headscale_linked=node is not None,
+                approved_at=station.approved_at,
+                approved_by=station.approved_by,
+                monitoring_configured=bool(station.vpn_ip and monitoring_node),
+                headscale_linked=monitoring_node is not None,
                 headscale_hostname=node.hostname if node else None,
+                headscale_approval_status=node.approval_status if node else None,
                 cameras_total=camera_total,
                 cameras_online=camera_online,
                 active_alerts=alert_counts.get(station.id, 0),

@@ -16,6 +16,7 @@ export interface User {
   username: string;
   email: string;
   role: Role;
+  is_active: boolean;
 }
 
 export interface Region {
@@ -54,9 +55,12 @@ export interface Station {
   telemetry_at: string | null;
   is_active: boolean;
   is_archived: boolean;
+  approved_at: string | null;
+  approved_by: number | null;
   monitoring_configured: boolean;
   headscale_linked: boolean;
   headscale_hostname: string | null;
+  headscale_approval_status: ApprovalStatus | null;
   cameras_total: number;
   cameras_online: number;
   active_alerts: number;
@@ -235,6 +239,42 @@ export interface RegistrationRequest {
   assigned_role: Role | null;
   requested_at: string;
   reviewed_at: string | null;
+}
+
+export interface StationApprovalPreview {
+  station_id: number;
+  station_code: string;
+  station_name: string;
+  district: string | null;
+  address: string;
+  vpn_ip: string | null;
+  local_ip: string | null;
+  headscale_hostname: string | null;
+  headscale_approval_status: ApprovalStatus | null;
+  monitoring_status: StationStatus;
+  monitoring_ready: boolean;
+  warning: string | null;
+  production_approved: boolean;
+  action: "approve" | "revoke";
+  confirmation_phrase: string;
+  valid: boolean;
+  errors: string[];
+  preview_token: string | null;
+}
+
+export interface TelegramLinkPreview {
+  registration_id: number;
+  telegram_user_id: number;
+  telegram_username: string | null;
+  user_id: number;
+  username: string;
+  role: Role;
+  is_active: boolean;
+  warning: string | null;
+  confirmation_phrase: string;
+  valid: boolean;
+  errors: string[];
+  preview_token: string | null;
 }
 
 export interface DistrictAssignment {

@@ -13,6 +13,7 @@ from ..database import SessionLocal
 from ..models import PingHistory, Station, StationStatus
 from .n8n import forward_event
 from .station_status import StationStatusResolver
+from .station_visibility import production_station_filter
 from .telegram import send_telegram
 
 
@@ -38,7 +39,7 @@ async def _ping_one(station: Station) -> tuple[float | None, float | None, bool,
 async def ping_station(station_id: int) -> None:
     async with SessionLocal() as db:
         station = await db.get(Station, station_id)
-        if not station or not station.is_active or station.is_archived:
+        if not station or station.approved_at is None or not station.is_active or station.is_archived:
             return
         latency, loss, success, error_type = await _ping_one(station)
         now = datetime.now(timezone.utc)
@@ -69,7 +70,7 @@ async def ping_all_stations() -> None:
     async with SessionLocal() as db:
         ids = (
             await db.execute(
-                select(Station.id).where(Station.is_active.is_(True), Station.is_archived.is_(False))
+                select(Station.id).where(production_station_filter())
             )
         ).scalars().all()
     await asyncio.gather(*(ping_station(station_id) for station_id in ids))
