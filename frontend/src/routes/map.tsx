@@ -1,40 +1,21 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
-import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+import { createClientOnlyFn } from "@tanstack/react-start";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Topbar } from "@/components/Topbar";
 import { getStations } from "@/lib/api";
-import type { Station, StationStatus } from "@/lib/types";
+import type { Station } from "@/lib/types";
 
 export const Route = createFileRoute("/map")({ component: MapPage });
 
-const COLORS: Record<StationStatus, string> = {
-  online: "#22c55e",
-  degraded: "#eab308",
-  offline: "#ef4444",
-  unknown: "#64748b",
-};
-function icon(status: StationStatus) {
-  const color = COLORS[status];
-  return L.divIcon({
-    className: "",
-    html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid white;box-shadow:0 0 8px ${color}"></div>`,
-    iconSize: [14, 14],
-  });
-}
-function elapsed(value: string | null) {
-  if (!value) return "—";
-  const seconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
-}
+const loadStationMap = createClientOnlyFn(() => import("@/components/StationMap.client"));
+const StationMapClient = lazy(loadStationMap);
 
 function MapPage() {
   const [stations, setStations] = useState<Station[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [mounted, setMounted] = useState(false);
   useEffect(() => {
+    setMounted(true);
     getStations({ limit: 200 })
       .then((result) => setStations(result.items))
       .catch((err) => setError(err instanceof Error ? err.message : "Map data unavailable"));
@@ -66,41 +47,13 @@ function MapPage() {
         {error && <div className="glass p-4 text-destructive">{error}</div>}
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_280px] gap-4">
           <div className="glass rounded-xl overflow-hidden">
-            <MapContainer
-              center={[38.5598, 68.787]}
-              zoom={12}
-              style={{ height: "700px", width: "100%" }}
-            >
-              <TileLayer
-                attribution="OpenStreetMap"
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              />
-              {placed.map((station) => (
-                <Marker
-                  key={station.id}
-                  position={[station.latitude!, station.longitude!]}
-                  icon={icon(station.status)}
-                >
-                  <Popup>
-                    <strong>
-                      {station.station_code} · {station.name}
-                    </strong>
-                    <br />
-                    District: {station.district ?? "—"}
-                    <br />
-                    Address: {station.address || "—"}
-                    <br />
-                    VPN: {station.vpn_ip ?? "—"}
-                    <br />
-                    Status: {station.status}
-                    <br />
-                    Last seen: {station.last_seen_at ? `${elapsed(station.last_seen_at)} ago` : "—"}
-                    <br />
-                    Offline: {station.status === "offline" ? elapsed(station.offline_since) : "—"}
-                  </Popup>
-                </Marker>
-              ))}
-            </MapContainer>
+            {mounted ? (
+              <Suspense fallback={<div className="h-[700px] animate-pulse bg-panel" />}>
+                <StationMapClient stations={placed} />
+              </Suspense>
+            ) : (
+              <div className="h-[700px] bg-panel" />
+            )}
           </div>
           <aside className="glass rounded-xl p-4 max-h-[700px] overflow-y-auto">
             <h2 className="text-sm font-semibold">Unplaced stations ({unplaced.length})</h2>
