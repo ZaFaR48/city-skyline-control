@@ -12,7 +12,10 @@ import {
   Workflow,
   Settings as SettingsIcon,
   ShieldCheck,
+  ClipboardCheck,
 } from "lucide-react";
+import { getStoredUser } from "@/lib/auth";
+import type { User } from "@/lib/types";
 
 type NavItem = { to: string; label: string; icon: typeof LayoutDashboard; exact?: boolean };
 const NAV: NavItem[] = [
@@ -24,6 +27,7 @@ const NAV: NavItem[] = [
   { to: "/analytics", label: "Reports", icon: BarChart3 },
   { to: "/rustdesk", label: "RustDesk", icon: Monitor },
   { to: "/headscale", label: "Headscale", icon: Network },
+  { to: "/onboarding", label: "Onboarding", icon: ClipboardCheck },
   { to: "/telegram", label: "Telegram", icon: Send },
   { to: "/n8n", label: "n8n", icon: Workflow },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
@@ -31,6 +35,7 @@ const NAV: NavItem[] = [
 
 export function Sidebar() {
   const path = useRouterState({ select: (s) => s.location.pathname });
+  const user = getStoredUser<User>();
   return (
     <aside className="hidden md:flex w-60 shrink-0 flex-col border-r border-border bg-panel/60 backdrop-blur-xl">
       <div className="h-16 flex items-center gap-2 px-5 border-b border-border">
@@ -45,7 +50,7 @@ export function Sidebar() {
         </div>
       </div>
       <nav className="flex-1 overflow-y-auto p-3 space-y-1">
-        {NAV.map((item) => {
+        {NAV.filter((item) => item.to !== "/onboarding" || user?.role === "admin").map((item) => {
           const active = item.exact ? path === item.to : path.startsWith(item.to);
           const Icon = item.icon;
           return (

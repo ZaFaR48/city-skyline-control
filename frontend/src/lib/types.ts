@@ -140,6 +140,27 @@ export interface HeadscaleNode {
   approval_status: ApprovalStatus;
   station_id: number | null;
   approved_at: string | null;
+  linked_station_code: string | null;
+  linked_station_name: string | null;
+  duplicate_vpn_ip: boolean;
+  duplicate_vpn_node_ids: number[];
+}
+
+export interface HeadscaleApprovalPreview {
+  node_id: number;
+  node_hostname: string;
+  node_given_name: string | null;
+  vpn_ip: string | null;
+  device_type: DeviceType;
+  station_id: number | null;
+  station_code: string | null;
+  station_name: string | null;
+  district: string | null;
+  node_existing_station_id: number | null;
+  station_existing_node_id: number | null;
+  valid: boolean;
+  errors: string[];
+  preview_token: string | null;
 }
 
 export interface DistrictHealth {
@@ -214,4 +235,64 @@ export interface RegistrationRequest {
   assigned_role: Role | null;
   requested_at: string;
   reviewed_at: string | null;
+}
+
+export interface DistrictAssignment {
+  station_code: string;
+  district: string;
+}
+
+export interface DistrictAssignmentRow {
+  station_id: number;
+  station_code: string;
+  station_name: string;
+  address: string;
+  vpn_ip: string | null;
+  headscale_hostname: string | null;
+  current_district: string | null;
+  proposed_district: string;
+  proposed_district_id: number;
+  changed: boolean;
+}
+
+export interface DistrictPreview {
+  valid: boolean;
+  rows: DistrictAssignmentRow[];
+  errors: Array<{ row: number; station_code: string | null; message: string }>;
+  preview_token: string | null;
+}
+
+export interface DuplicateVpnGroup {
+  vpn_ip: string;
+  stations: Array<{
+    station_id: number;
+    station_code: string;
+    station_name: string;
+    status: StationStatus;
+    last_seen_at: string | null;
+    linked_node_id: number | null;
+    linked_node_hostname: string | null;
+    linked_node_approval_status: ApprovalStatus | null;
+  }>;
+  recommended_remediation: string;
+}
+
+export interface DuplicateAlertGroup {
+  station_id: number;
+  station_code: string;
+  station_name: string;
+  alert_type: AlertType;
+  open_alert_count: number;
+  oldest_alert_at: string;
+  newest_alert_at: string;
+  canonical_alert_id: number;
+  proposed_resolve_alert_ids: number[];
+  preview_token: string;
+}
+
+export interface ActionPreview {
+  valid: boolean;
+  description: string;
+  errors: string[];
+  preview_token: string | null;
 }

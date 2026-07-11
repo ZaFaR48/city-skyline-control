@@ -13,6 +13,7 @@ import { Route as TelegramRouteImport } from './routes/telegram'
 import { Route as StationsRouteImport } from './routes/stations'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as RustdeskRouteImport } from './routes/rustdesk'
+import { Route as OnboardingRouteImport } from './routes/onboarding'
 import { Route as N8nRouteImport } from './routes/n8n'
 import { Route as MapRouteImport } from './routes/map'
 import { Route as LoginRouteImport } from './routes/login'
@@ -41,6 +42,11 @@ const SettingsRoute = SettingsRouteImport.update({
 const RustdeskRoute = RustdeskRouteImport.update({
   id: '/rustdesk',
   path: '/rustdesk',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OnboardingRoute = OnboardingRouteImport.update({
+  id: '/onboarding',
+  path: '/onboarding',
   getParentRoute: () => rootRouteImport,
 } as any)
 const N8nRoute = N8nRouteImport.update({
@@ -99,6 +105,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/map': typeof MapRoute
   '/n8n': typeof N8nRoute
+  '/onboarding': typeof OnboardingRoute
   '/rustdesk': typeof RustdeskRoute
   '/settings': typeof SettingsRoute
   '/stations': typeof StationsRoute
@@ -114,6 +121,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/map': typeof MapRoute
   '/n8n': typeof N8nRoute
+  '/onboarding': typeof OnboardingRoute
   '/rustdesk': typeof RustdeskRoute
   '/settings': typeof SettingsRoute
   '/stations': typeof StationsRoute
@@ -130,6 +138,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/map': typeof MapRoute
   '/n8n': typeof N8nRoute
+  '/onboarding': typeof OnboardingRoute
   '/rustdesk': typeof RustdeskRoute
   '/settings': typeof SettingsRoute
   '/stations': typeof StationsRoute
@@ -147,6 +156,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/map'
     | '/n8n'
+    | '/onboarding'
     | '/rustdesk'
     | '/settings'
     | '/stations'
@@ -162,6 +172,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/map'
     | '/n8n'
+    | '/onboarding'
     | '/rustdesk'
     | '/settings'
     | '/stations'
@@ -177,6 +188,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/map'
     | '/n8n'
+    | '/onboarding'
     | '/rustdesk'
     | '/settings'
     | '/stations'
@@ -193,6 +205,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   MapRoute: typeof MapRoute
   N8nRoute: typeof N8nRoute
+  OnboardingRoute: typeof OnboardingRoute
   RustdeskRoute: typeof RustdeskRoute
   SettingsRoute: typeof SettingsRoute
   StationsRoute: typeof StationsRoute
@@ -227,6 +240,13 @@ declare module '@tanstack/react-router' {
       path: '/rustdesk'
       fullPath: '/rustdesk'
       preLoaderRoute: typeof RustdeskRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/onboarding': {
+      id: '/onboarding'
+      path: '/onboarding'
+      fullPath: '/onboarding'
+      preLoaderRoute: typeof OnboardingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/n8n': {
@@ -305,6 +325,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   MapRoute: MapRoute,
   N8nRoute: N8nRoute,
+  OnboardingRoute: OnboardingRoute,
   RustdeskRoute: RustdeskRoute,
   SettingsRoute: SettingsRoute,
   StationsRoute: StationsRoute,

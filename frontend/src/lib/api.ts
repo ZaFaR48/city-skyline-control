@@ -1,8 +1,14 @@
 import { clearAuth, getToken, setStoredUser, setToken } from "./auth";
 import type {
   AlertItem,
+  ActionPreview,
   Camera,
   DashboardSummary,
+  DistrictAssignment,
+  DistrictPreview,
+  DuplicateAlertGroup,
+  DuplicateVpnGroup,
+  HeadscaleApprovalPreview,
   HeadscaleNode,
   Region,
   RegistrationRequest,
@@ -48,7 +54,9 @@ export async function apiFetch<T>(
   authenticated = true,
 ): Promise<T> {
   const headers = new Headers(init.headers);
-  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
   if (authenticated) {
     const token = getToken();
     if (!token) throw new ApiError("Authentication required", 401);
@@ -98,14 +106,30 @@ export const getAlerts = (
 ) => apiFetch<AlertItem[]>(`/api/alerts${query(params)}`);
 export const acknowledgeAlert = (id: number) =>
   apiFetch<AlertItem>(`/api/alerts/${id}/ack`, { method: "POST" });
-export const getHeadscaleNodes = (pending = false) =>
-  apiFetch<HeadscaleNode[]>(`/api/headscale/nodes${pending ? "/pending" : ""}`);
+export const getHeadscaleNodes = (
+  params: Record<string, string | number | boolean | null | undefined> = {},
+) => apiFetch<HeadscaleNode[]>(`/api/headscale/nodes${query(params)}`);
 export const syncHeadscale = () =>
   apiFetch<{ added: number }>("/api/headscale/sync", { method: "POST" });
-export const approveHeadscaleNode = (id: number, deviceType: string, stationId?: number) =>
-  apiFetch<HeadscaleNode>(`/api/headscale/nodes/${id}/approve`, {
+export const previewHeadscaleApproval = (id: number, deviceType: string, stationId?: number) =>
+  apiFetch<HeadscaleApprovalPreview>(`/api/headscale/nodes/${id}/approval-preview`, {
     method: "POST",
     body: JSON.stringify({ device_type: deviceType, station_id: stationId ?? null }),
+  });
+export const approveHeadscaleNode = (
+  id: number,
+  deviceType: string,
+  stationId: number | undefined,
+  previewToken: string,
+) =>
+  apiFetch<HeadscaleNode>(`/api/headscale/nodes/${id}/approve`, {
+    method: "POST",
+    body: JSON.stringify({
+      device_type: deviceType,
+      station_id: stationId ?? null,
+      preview_token: previewToken,
+      confirmation: "APPROVE AND LINK",
+    }),
   });
 export const rejectHeadscaleNode = (id: number) =>
   apiFetch<HeadscaleNode>(`/api/headscale/nodes/${id}/reject`, { method: "POST" });
@@ -135,3 +159,81 @@ export const getRustdeskDevices = () =>
       rustdesk_id: string;
     }>
   >("/api/rustdesk");
+
+export const getDistrictOnboardingStations = () =>
+  apiFetch<Station[]>("/api/onboarding/districts/stations");
+export const previewDistrictAssignments = (assignments: DistrictAssignment[]) =>
+  apiFetch<DistrictPreview>("/api/onboarding/districts/preview", {
+    method: "POST",
+    body: JSON.stringify({ assignments }),
+  });
+export const applyDistrictAssignments = (assignments: DistrictAssignment[], previewToken: string) =>
+  apiFetch<{ applied: number; unchanged: number }>("/api/onboarding/districts/apply", {
+    method: "POST",
+    body: JSON.stringify({
+      assignments,
+      preview_token: previewToken,
+      confirmation: "ASSIGN DISTRICTS",
+    }),
+  });
+export const previewDistrictCsv = (file: File) => {
+  const body = new FormData();
+  body.append("file", file);
+  return apiFetch<DistrictPreview>("/api/onboarding/districts/csv/preview", {
+    method: "POST",
+    body,
+  });
+};
+export const applyDistrictCsv = (file: File, previewToken: string) => {
+  const body = new FormData();
+  body.append("file", file);
+  body.append("preview_token", previewToken);
+  body.append("confirmation", "ASSIGN DISTRICTS");
+  return apiFetch<{ applied: number; unchanged: number }>("/api/onboarding/districts/csv/apply", {
+    method: "POST",
+    body,
+  });
+};
+export const downloadDistrictTemplate = async () => {
+  const token = getToken();
+  if (!token) throw new ApiError("Authentication required", 401);
+  const response = await fetch(`${API_URL}/api/onboarding/districts/template.csv`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new ApiError("CSV template could not be downloaded", response.status);
+  return response.blob();
+};
+export const getDuplicateVpnReport = () =>
+  apiFetch<DuplicateVpnGroup[]>("/api/onboarding/duplicate-vpn");
+export const getDuplicateAlertReport = () =>
+  apiFetch<DuplicateAlertGroup[]>("/api/onboarding/duplicate-alerts");
+export const previewDuplicateVpnAction = (data: {
+  action: "unlink_node" | "clear_station_vpn" | "select_canonical_node" | "cancel";
+  vpn_ip: string;
+  station_id?: number;
+  node_id?: number;
+}) =>
+  apiFetch<ActionPreview>("/api/onboarding/duplicate-vpn/action-preview", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+export const applyDuplicateVpnAction = (
+  data: {
+    action: "unlink_node" | "clear_station_vpn" | "select_canonical_node" | "cancel";
+    vpn_ip: string;
+    station_id?: number;
+    node_id?: number;
+  },
+  previewToken: string,
+) =>
+  apiFetch<{ applied: boolean; description?: string; status?: string }>(
+    "/api/onboarding/duplicate-vpn/action-apply",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        ...data,
+        preview_token: previewToken,
+        confirmation: "APPLY VPN ACTION",
+      }),
+    },
+  );
