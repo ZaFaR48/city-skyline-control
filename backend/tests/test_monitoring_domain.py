@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from app.models import (
+    Alert,
     ApprovalStatus,
     DeviceType,
     HeadscaleNode,
@@ -77,6 +78,27 @@ async def test_offline_transition_is_single_and_recovery_closes_event(db):
     offline_event = (await db.execute(select(StationStatusEvent).where(StationStatusEvent.station_id == first.id, StationStatusEvent.new_status == "offline"))).scalar_one()
     assert offline_event.ended_at is not None
     assert offline_event.duration_seconds is not None and offline_event.duration_seconds >= 0
+
+
+@pytest.mark.asyncio
+async def test_unknown_transition_does_not_resolve_offline_alert(db):
+    first = await station(db, "91005", StationStatus.offline.value)
+    alert = Alert(
+        station_id=first.id,
+        type="offline_station",
+        severity="critical",
+        message="Confirmed outage",
+    )
+    db.add(alert)
+    await db.flush()
+    await StationStatusResolver.transition(
+        db,
+        first,
+        new_status=StationStatus.unknown,
+        source="system",
+        reason="Monitoring not configured",
+    )
+    assert alert.resolved_at is None
 
 
 @pytest.mark.asyncio

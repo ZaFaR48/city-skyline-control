@@ -40,11 +40,23 @@ function MapPage() {
       .catch((err) => setError(err instanceof Error ? err.message : "Map data unavailable"));
   }, []);
   const placed = useMemo(
-    () => stations.filter((station) => station.latitude !== null && station.longitude !== null),
+    () =>
+      stations.filter(
+        (station) =>
+          station.latitude !== null &&
+          station.longitude !== null &&
+          !(station.latitude === 0 && station.longitude === 0),
+      ),
     [stations],
   );
   const unplaced = useMemo(
-    () => stations.filter((station) => station.latitude === null || station.longitude === null),
+    () =>
+      stations.filter(
+        (station) =>
+          station.latitude === null ||
+          station.longitude === null ||
+          (station.latitude === 0 && station.longitude === 0),
+      ),
     [stations],
   );
   return (

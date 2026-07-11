@@ -72,7 +72,11 @@ async def audit(apply: bool) -> int:
                 findings.append(("duplicate_vpn_ip", station.station_code, f"VPN IP {station.vpn_ip} is shared; verify Headscale identity and correct the station assignment."))
             if station.district_id is None:
                 findings.append(("missing_district", station.station_code, "Assign one verified Dushanbe district; do not infer it from the station name."))
-            if station.latitude is None or station.longitude is None:
+            if (
+                station.latitude is None
+                or station.longitude is None
+                or (station.latitude == 0 and station.longitude == 0)
+            ):
                 findings.append(("missing_coordinates", station.station_code, "Capture verified coordinates before placing this station on the map."))
             if (station.cpu is not None or station.ram is not None or station.disk is not None) and station.id not in sample_station_ids:
                 findings.append(("unproven_telemetry", station.station_code, "Clear CPU/RAM/disk because no agent telemetry sample proves the values."))

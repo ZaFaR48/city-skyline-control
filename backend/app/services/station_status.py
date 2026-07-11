@@ -164,16 +164,17 @@ class StationStatusResolver:
                 )
         elif previous == StationStatus.offline.value:
             station.offline_since = None
-            active_alerts = (
-                await db.execute(
-                    select(Alert).where(
-                        Alert.station_id == station.id,
-                        Alert.type == AlertType.offline_station.value,
-                        Alert.resolved_at.is_(None),
+            if status_value == StationStatus.online.value:
+                active_alerts = (
+                    await db.execute(
+                        select(Alert).where(
+                            Alert.station_id == station.id,
+                            Alert.type == AlertType.offline_station.value,
+                            Alert.resolved_at.is_(None),
+                        )
                     )
-                )
-            ).scalars().all()
-            for alert in active_alerts:
-                alert.resolved_at = now
+                ).scalars().all()
+                for alert in active_alerts:
+                    alert.resolved_at = now
 
         return StatusResolution(previous, status_value, True, reason)
