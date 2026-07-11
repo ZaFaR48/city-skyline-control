@@ -1,0 +1,32 @@
+[Unit]
+Description=City Skyline Telegram Bot
+Wants=network-online.target
+After=network-online.target city-backend.service
+
+[Service]
+Type=simple
+User=city-telegram
+Group=city-telegram
+WorkingDirectory=/opt/city-skyline-control/telegram-bot
+EnvironmentFile=/opt/city-skyline-control/telegram-bot/.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/city-skyline-control/telegram-bot/venv/bin/python /opt/city-skyline-control/telegram-bot/app.py
+Restart=always
+RestartSec=5
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

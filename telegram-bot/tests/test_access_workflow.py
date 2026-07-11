@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -7,6 +8,9 @@ import pytest
 from api import BackendAPI
 from app import build_dispatcher
 from keyboards import main_keyboard, registration_review_keyboard
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_admin_keyboard_exposes_pending_users_only_for_admins():
@@ -32,6 +36,20 @@ def test_dispatcher_has_access_middleware_and_existing_bot_routers():
     dispatcher = build_dispatcher()
     assert dispatcher.sub_routers
     assert dispatcher.message.outer_middleware
+
+
+def test_production_settings_and_systemd_startup_are_valid():
+    from config import settings
+
+    settings.validate()
+    unit = (ROOT / "deployment" / "city-telegram-bot.service").read_text()
+    assert "WorkingDirectory=/opt/city-skyline-control/telegram-bot" in unit
+    assert "EnvironmentFile=/opt/city-skyline-control/telegram-bot/.env" in unit
+    assert "ExecStart=/opt/city-skyline-control/telegram-bot/venv/bin/python" in unit
+    assert "Restart=always" in unit
+    assert "RestartSec=5" in unit
+    assert "After=network-online.target city-backend.service" in unit
+    assert "User=city-telegram" in unit
 
 
 @pytest.mark.asyncio
