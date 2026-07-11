@@ -72,6 +72,17 @@ async def serialize_stations(db: AsyncSession, stations: list[Station]) -> list[
             and node.device_type == DeviceType.station.value
             else None
         )
+        warnings = []
+        district_name = regions[station.district_id].name if station.district_id else None
+        normalized_name = station.name.casefold().removeprefix("н.").strip()
+        if district_name and normalized_name == district_name.casefold():
+            warnings.append("Station name duplicates the district name")
+        if station.address and len(station.address.strip()) <= 64 and not any(char.isdigit() for char in station.address):
+            warnings.append("Address may contain only a landmark; verify an exact address")
+        if station.vpn_ip and not monitoring_node:
+            warnings.append("Manual VPN IP is stored without an approved linked Headscale station node")
+        if station.local_ip and not monitoring_node:
+            warnings.append("Local IP is stored without a configured monitoring agent")
         output.append(
             StationOut(
                 id=station.id,
@@ -82,6 +93,7 @@ async def serialize_stations(db: AsyncSession, stations: list[Station]) -> list[
                 district_id=station.district_id,
                 district=regions[station.district_id].name if station.district_id else None,
                 address=station.address,
+                operational_area=station.operational_area,
                 latitude=station.latitude,
                 longitude=station.longitude,
                 vpn_ip=station.vpn_ip,
@@ -108,6 +120,7 @@ async def serialize_stations(db: AsyncSession, stations: list[Station]) -> list[
                 cameras_total=camera_total,
                 cameras_online=camera_online,
                 active_alerts=alert_counts.get(station.id, 0),
+                data_quality_warnings=warnings,
             )
         )
     return output

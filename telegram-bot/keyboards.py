@@ -46,12 +46,13 @@ def registration_review_keyboard(registration_id: int) -> InlineKeyboardMarkup:
     ])
 
 
-def skip_keyboard(lang: str = "tj") -> ReplyKeyboardMarkup:
+def navigation_keyboard(lang: str = "tj", *, allow_skip: bool = False, keep_existing: bool = False) -> ReplyKeyboardMarkup:
+    rows = []
+    if allow_skip:
+        rows.append([KeyboardButton(text=t(lang, "keep_existing_field" if keep_existing else "skip_now"))])
+    rows.extend([[KeyboardButton(text=t(lang, "back"))], [KeyboardButton(text=t(lang, "cancel"))]])
     return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=t(lang, "skip"))],
-            [KeyboardButton(text=t(lang, "cancel"))],
-        ],
+        keyboard=rows,
         resize_keyboard=True,
     )
 
@@ -60,28 +61,15 @@ def location_keyboard(lang: str = "tj") -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=t(lang, "send_location"), request_location=True)],
-            [KeyboardButton(text=t(lang, "skip"))],
+            [KeyboardButton(text=t(lang, "skip_now"))],
+            [KeyboardButton(text=t(lang, "back"))],
             [KeyboardButton(text=t(lang, "cancel"))],
         ],
         resize_keyboard=True,
     )
 
 
-def confirm_keyboard(lang: str = "tj") -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=t(lang, "save"))],
-            [KeyboardButton(text=t(lang, "cancel"))],
-        ],
-        resize_keyboard=True,
-    )
-
-
-def approved_update_keyboard(lang: str = "tj") -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=t(lang, "confirm_approved_update"))],
-            [KeyboardButton(text=t(lang, "cancel"))],
-        ],
-        resize_keyboard=True,
-    )
+def wizard_inline(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=text, callback_data=data) for text, data in row] for row in rows
+    ])

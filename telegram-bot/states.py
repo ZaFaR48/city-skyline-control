@@ -3,12 +3,13 @@ from aiogram.fsm.state import State, StatesGroup
 
 class AddStation(StatesGroup):
     code = State()
-    name = State()
-    region = State()
+    existing_action = State()
+    city = State()
+    district = State()
+    operational_area = State()
     address = State()
-    vpn_ip = State()
-    local_ip = State()
-    rustdesk_id = State()
+    name_choice = State()
+    name = State()
     gps = State()
     confirm = State()
 

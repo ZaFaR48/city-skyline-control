@@ -24,6 +24,7 @@ from ..models import (
 )
 from ..schemas import (
     ActionPreviewOut,
+    ApprovalCheckOut,
     DistrictApplyIn,
     DistrictAssignmentIn,
     DistrictAssignmentRow,
@@ -39,6 +40,10 @@ from ..schemas import (
     StationOut,
     StationApprovalApplyIn,
     StationApprovalPreviewOut,
+    StationRepairApplyIn,
+    StationRepairChangeOut,
+    StationRepairIn,
+    StationRepairPreviewOut,
 )
 from ..services.audit import add_audit
 from ..services.confirmation_tokens import create_confirmation_token, verify_confirmation_token
@@ -184,6 +189,54 @@ async def revoke_station_from_production(
         actor=user,
         before=before,
         after={"approved_at": None, "approved_by": None},
+        request=request,
+    )
+    await db.commit()
+    station = await _onboarding_station(db, station_id)
+    return (await serialize_stations(db, [station]))[0]
+
+
+@router.post("/stations/{station_id}/repair-preview", response_model=StationRepairPreviewOut)
+async def preview_station_repair(
+    station_id: int,
+    data: StationRepairIn,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(Role.admin)),
+):
+    station = await _onboarding_station(db, station_id)
+    return await _station_repair_preview(db, station, data)
+
+
+@router.post("/stations/{station_id}/repair", response_model=StationOut)
+async def apply_station_repair(
+    station_id: int,
+    data: StationRepairApplyIn,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_roles(Role.admin)),
+):
+    station = await _onboarding_station(db, station_id)
+    fields = {key: value for key, value in data.model_dump(exclude_unset=True).items() if key not in {"preview_token", "confirmation"}}
+    proposal = StationRepairIn(**fields)
+    preview = await _station_repair_preview(db, station, proposal)
+    if not preview.valid or not preview.preview_token:
+        raise HTTPException(422, preview.errors)
+    if data.confirmation != preview.confirmation_phrase:
+        raise HTTPException(422, "Explicit repair confirmation is required")
+    payload = _station_repair_payload(station, preview)
+    if not verify_confirmation_token(data.preview_token, "station-repair", payload):
+        raise HTTPException(409, "Repair preview expired or station data changed; preview again")
+    before = {change.field: getattr(station, change.field) for change in preview.changes}
+    for change in preview.changes:
+        setattr(station, change.field, change.proposed)
+    add_audit(
+        db,
+        action="station.data_repair",
+        entity_type="station",
+        entity_id=station.id,
+        actor=user,
+        before=before,
+        after={change.field: change.proposed for change in preview.changes},
         request=request,
     )
     await db.commit()
@@ -437,6 +490,17 @@ async def apply_duplicate_vpn_action(
         node.station_id = station.id
         station.vpn_ip = node.vpn_ip
         add_audit(db, action="headscale.select_canonical", entity_type="headscale_node", entity_id=node.id, actor=user, before=before, after={"station_id": station.id, "station_vpn_ip": station.vpn_ip}, request=request)
+        if before["station_vpn_ip"] != station.vpn_ip:
+            add_audit(
+                db,
+                action="station.vpn_sync_headscale",
+                entity_type="station",
+                entity_id=station.id,
+                actor=user,
+                before={"vpn_ip": before["station_vpn_ip"], "headscale_node_id": node.id},
+                after={"vpn_ip": station.vpn_ip, "headscale_node_id": node.id},
+                request=request,
+            )
     await db.commit()
     return {"applied": True, "description": description}
 
@@ -556,18 +620,43 @@ async def _station_approval_preview(
         and station.district.code in SUPPORTED_DISTRICT_CODES
         and station.district.parent_id == station.city_id
     )
-    monitoring_ready = bool(
-        station.vpn_ip
-        and node
-        and node.device_type == DeviceType.station.value
-        and node.approval_status == ApprovalStatus.approved.value
-    )
+    checklist = [
+        ApprovalCheckOut(
+            key="verified_district",
+            label="Verified Dushanbe district",
+            ready=verified_district,
+        ),
+        ApprovalCheckOut(
+            key="linked_headscale_node",
+            label="Headscale node linked to this station",
+            ready=node is not None,
+        ),
+        ApprovalCheckOut(
+            key="approved_station_node",
+            label="Linked node approved as a station device",
+            ready=bool(
+                node
+                and node.device_type == DeviceType.station.value
+                and node.approval_status == ApprovalStatus.approved.value
+            ),
+        ),
+        ApprovalCheckOut(
+            key="one_to_one_link",
+            label="Station and Headscale node have a one-to-one link",
+            ready=bool(node and node.station_id == station.id),
+        ),
+        ApprovalCheckOut(
+            key="monitoring_configured",
+            label="Monitoring VPN matches the approved Headscale node",
+            ready=bool(node and node.vpn_ip and station.vpn_ip == node.vpn_ip),
+        ),
+    ]
+    monitoring_ready = all(item.ready for item in checklist)
     errors: list[str] = []
     if action == "approve":
         if station.approved_at is not None:
             errors.append("Station is already approved for production")
-        if not verified_district:
-            errors.append("A verified Dushanbe district is required before approval")
+        errors.extend(f"Required check failed: {item.label}" for item in checklist if not item.ready)
         confirmation_phrase = f"APPROVE STATION {station.station_code}"
         purpose = "station-approval"
     else:
@@ -587,13 +676,18 @@ async def _station_approval_preview(
         headscale_approval_status=node.approval_status if node else None,
         monitoring_status=station.status,
         monitoring_ready=monitoring_ready,
-        warning=None if monitoring_ready else "Monitoring is not configured; station will appear as UNKNOWN.",
+        warning=(
+            "The approved monitoring node is currently offline; offline status does not block approval."
+            if monitoring_ready and node and not node.online
+            else None
+        ),
         production_approved=station.approved_at is not None,
         action=action,
         confirmation_phrase=confirmation_phrase,
         valid=not errors,
         errors=errors,
         preview_token=None,
+        checklist=checklist,
     )
     if preview.valid:
         preview.preview_token = create_confirmation_token(
@@ -619,6 +713,89 @@ def _station_approval_payload(
         "headscale_hostname": preview.headscale_hostname,
         "headscale_approval_status": preview.headscale_approval_status,
         "monitoring_ready": preview.monitoring_ready,
+    }
+
+
+async def _station_repair_preview(
+    db: AsyncSession,
+    station: Station,
+    data: StationRepairIn,
+) -> StationRepairPreviewOut:
+    changes = [
+        StationRepairChangeOut(field=field, current=getattr(station, field), proposed=value)
+        for field, value in data.model_dump(exclude_unset=True).items()
+        if getattr(station, field) != value
+    ]
+    errors: list[str] = []
+    proposed_name = next((item.proposed for item in changes if item.field == "name"), station.name)
+    proposed_address = next((item.proposed for item in changes if item.field == "address"), station.address)
+    if not isinstance(proposed_name, str) or not proposed_name.strip():
+        errors.append("Station name cannot be empty")
+    if not isinstance(proposed_address, str):
+        errors.append("Station address cannot be null")
+    final_latitude = next((item.proposed for item in changes if item.field == "latitude"), station.latitude)
+    final_longitude = next((item.proposed for item in changes if item.field == "longitude"), station.longitude)
+    if final_latitude is not None and not -90 <= final_latitude <= 90:
+        errors.append("Latitude must be between -90 and 90")
+    if final_longitude is not None and not -180 <= final_longitude <= 180:
+        errors.append("Longitude must be between -180 and 180")
+    node = (
+        await db.execute(select(HeadscaleNode).where(HeadscaleNode.station_id == station.id))
+    ).scalar_one_or_none()
+    proposed_vpn = next((item.proposed for item in changes if item.field == "vpn_ip"), station.vpn_ip)
+    if node and node.approval_status == ApprovalStatus.approved.value and node.device_type == DeviceType.station.value and node.vpn_ip and proposed_vpn != node.vpn_ip:
+        errors.append("VPN IP must match the approved linked Headscale station node")
+    final = {field: getattr(station, field) for field in ("name", "operational_area", "address", "vpn_ip", "local_ip")}
+    final.update({item.field: item.proposed for item in changes})
+    warnings = _repair_quality_warnings(station, final, node)
+    if not changes:
+        errors.append("No field changes were proposed")
+    phrase = f"REPAIR STATION {station.station_code}"
+    preview = StationRepairPreviewOut(
+        station_id=station.id,
+        station_code=station.station_code,
+        changes=changes,
+        warnings=warnings,
+        errors=errors,
+        confirmation_phrase=phrase,
+        valid=not errors,
+        preview_token=None,
+    )
+    if preview.valid:
+        preview.preview_token = create_confirmation_token("station-repair", _station_repair_payload(station, preview))
+    return preview
+
+
+def _repair_quality_warnings(
+    station: Station,
+    final: dict[str, object],
+    node: HeadscaleNode | None,
+) -> list[str]:
+    warnings: list[str] = []
+    district_name = station.district.name if station.district else None
+    name = str(final.get("name") or "").casefold().removeprefix("н.").strip()
+    if district_name and name == district_name.casefold():
+        warnings.append("Station name equals the district name")
+    address = str(final.get("address") or "").strip()
+    if address and len(address) <= 64 and not any(char.isdigit() for char in address):
+        warnings.append("Address looks like only a landmark; verify street/building details")
+    monitoring_node = bool(
+        node
+        and node.approval_status == ApprovalStatus.approved.value
+        and node.device_type == DeviceType.station.value
+    )
+    if final.get("vpn_ip") and not monitoring_node:
+        warnings.append("Manual VPN IP has no approved linked Headscale station node")
+    if final.get("local_ip") and not monitoring_node:
+        warnings.append("Local IP has no configured monitoring agent")
+    return warnings
+
+
+def _station_repair_payload(station: Station, preview: StationRepairPreviewOut) -> dict[str, object]:
+    return {
+        "station_id": station.id,
+        "station_code": station.station_code,
+        "changes": [item.model_dump() for item in preview.changes],
     }
 
 

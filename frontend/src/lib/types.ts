@@ -38,6 +38,7 @@ export interface Station {
   district_id: number | null;
   district: string | null;
   address: string;
+  operational_area: string | null;
   latitude: number | null;
   longitude: number | null;
   vpn_ip: string | null;
@@ -64,6 +65,7 @@ export interface Station {
   cameras_total: number;
   cameras_online: number;
   active_alerts: number;
+  data_quality_warnings: string[];
 }
 
 export interface StationList {
@@ -155,6 +157,7 @@ export interface HeadscaleApprovalPreview {
   node_hostname: string;
   node_given_name: string | null;
   vpn_ip: string | null;
+  station_vpn_ip: string | null;
   device_type: DeviceType;
   station_id: number | null;
   station_code: string | null;
@@ -165,6 +168,7 @@ export interface HeadscaleApprovalPreview {
   valid: boolean;
   errors: string[];
   preview_token: string | null;
+  vpn_replacement_warning: string | null;
 }
 
 export interface DistrictHealth {
@@ -259,6 +263,18 @@ export interface StationApprovalPreview {
   confirmation_phrase: string;
   valid: boolean;
   errors: string[];
+  preview_token: string | null;
+  checklist: Array<{ key: string; label: string; ready: boolean }>;
+}
+
+export interface StationRepairPreview {
+  station_id: number;
+  station_code: string;
+  changes: Array<{ field: string; current: unknown; proposed: unknown }>;
+  warnings: string[];
+  errors: string[];
+  confirmation_phrase: string;
+  valid: boolean;
   preview_token: string | null;
 }
 

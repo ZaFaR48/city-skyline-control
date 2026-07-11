@@ -154,6 +154,7 @@ class Station(Base):
     )
     legacy_region: Mapped[str | None] = mapped_column(String(64), nullable=True)
     address: Mapped[str] = mapped_column(String(255), default="")
+    operational_area: Mapped[str | None] = mapped_column(String(128), nullable=True)
     latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     vpn_ip: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)

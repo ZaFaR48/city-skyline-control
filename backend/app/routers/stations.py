@@ -216,6 +216,18 @@ async def update_station(
     city_id = changes.get("city_id", station.city_id)
     district_id = changes.get("district_id", station.district_id)
     await _validate_regions(db, city_id, district_id)
+    if "vpn_ip" in changes:
+        approved_node = (
+            await db.execute(
+                select(HeadscaleNode).where(
+                    HeadscaleNode.station_id == station.id,
+                    HeadscaleNode.approval_status == ApprovalStatus.approved.value,
+                    HeadscaleNode.device_type == DeviceType.station.value,
+                )
+            )
+        ).scalar_one_or_none()
+        if approved_node and approved_node.vpn_ip and changes["vpn_ip"] != approved_node.vpn_ip:
+            raise HTTPException(409, "VPN IP is controlled by the approved linked Headscale station node")
     before = {key: getattr(station, key) for key in changes}
     for key, value in changes.items():
         setattr(station, key, value)

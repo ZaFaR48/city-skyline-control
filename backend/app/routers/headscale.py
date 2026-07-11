@@ -93,7 +93,7 @@ async def approve_node(
             raise HTTPException(404, "Active station not found")
         await _assert_link_available(db, node, station)
         node.station_id = station.id
-        station.vpn_ip = node.vpn_ip or station.vpn_ip
+        _sync_station_vpn_from_node(db, station, node, user, request)
     else:
         if data.station_id is not None:
             raise HTTPException(422, "Non-station devices cannot be linked to a station")
@@ -150,6 +150,8 @@ async def link_station(
         "station_id": station.id,
         "node_station_id": node.station_id,
         "station_existing_node_id": await _station_existing_node_id(db, station.id, node.id),
+        "node_vpn_ip": node.vpn_ip,
+        "station_vpn_ip": station.vpn_ip,
     }
     if not verify_confirmation_token(data.preview_token, "headscale-link", payload):
         raise HTTPException(409, "Link preview expired or inventory changed; preview again")
@@ -157,7 +159,7 @@ async def link_station(
     before = _audit_snapshot(node)
     node.device_type = DeviceType.station.value
     node.station_id = station.id
-    station.vpn_ip = node.vpn_ip or station.vpn_ip
+    _sync_station_vpn_from_node(db, station, node, user, request)
     add_audit(db, action="headscale.link", entity_type="headscale_node", entity_id=node.id, actor=user, before=before, after=_audit_snapshot(node), request=request)
     await db.commit()
     await db.refresh(node)
@@ -189,6 +191,8 @@ async def preview_station_link(
         "station_id": station_id,
         "node_station_id": node.station_id,
         "station_existing_node_id": existing_id,
+        "node_vpn_ip": node.vpn_ip,
+        "station_vpn_ip": station.vpn_ip if station else None,
     }
     return {
         "valid": not errors,
@@ -198,6 +202,9 @@ async def preview_station_link(
         "station_id": station_id,
         "station_code": station.station_code if station else None,
         "station_name": station.name if station else None,
+        "node_vpn_ip": node.vpn_ip,
+        "station_vpn_ip": station.vpn_ip if station else None,
+        "vpn_replacement_warning": _vpn_replacement_warning(station, node),
         "preview_token": create_confirmation_token("headscale-link", payload) if not errors else None,
     }
 
@@ -259,10 +266,45 @@ def _audit_snapshot(node: HeadscaleNode) -> dict[str, object]:
     }
 
 
+def _vpn_replacement_warning(station: Station | None, node: HeadscaleNode) -> str | None:
+    if station and station.vpn_ip and node.vpn_ip and station.vpn_ip != node.vpn_ip:
+        return f"Station VPN will change from {station.vpn_ip} to Headscale VPN {node.vpn_ip}"
+    return None
+
+
+def _sync_station_vpn_from_node(
+    db: AsyncSession,
+    station: Station,
+    node: HeadscaleNode,
+    actor: User,
+    request: Request,
+) -> None:
+    if not node.vpn_ip or station.vpn_ip == node.vpn_ip:
+        return
+    previous = station.vpn_ip
+    station.vpn_ip = node.vpn_ip
+    add_audit(
+        db,
+        action="station.vpn_sync_headscale",
+        entity_type="station",
+        entity_id=station.id,
+        actor=actor,
+        before={"vpn_ip": previous, "headscale_node_id": node.id},
+        after={"vpn_ip": node.vpn_ip, "headscale_node_id": node.id},
+        request=request,
+    )
+
+
 async def _approval_preview(db: AsyncSession, node: HeadscaleNode, data: HeadscaleApproveIn):
     errors: list[str] = []
     station = (
-        await db.get(Station, data.station_id, options=[selectinload(Station.district)])
+        (
+            await db.execute(
+                select(Station)
+                .where(Station.id == data.station_id)
+                .options(selectinload(Station.district))
+            )
+        ).scalar_one_or_none()
         if data.station_id
         else None
     )
@@ -290,6 +332,7 @@ async def _approval_preview(db: AsyncSession, node: HeadscaleNode, data: Headsca
         "node_existing_station_id": node.station_id,
         "station_existing_node_id": existing_id,
         "vpn_ip": node.vpn_ip,
+        "station_vpn_ip": station.vpn_ip if station else None,
     }
     preview = {
         "node_id": node.id,
@@ -303,6 +346,7 @@ async def _approval_preview(db: AsyncSession, node: HeadscaleNode, data: Headsca
         "district": district,
         "node_existing_station_id": node.station_id,
         "station_existing_node_id": existing_id,
+        "vpn_replacement_warning": _vpn_replacement_warning(station, node),
         "valid": not errors,
         "errors": errors,
     }

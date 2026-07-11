@@ -77,7 +77,7 @@ async def test_unapproved_station_is_excluded_from_default_station_map_feed_and_
 
 
 @pytest.mark.asyncio
-async def test_approval_sets_actor_keeps_headscale_independent_and_writes_audit(db):
+async def test_approval_blocks_pending_or_unconfigured_headscale_node(db):
     station = await create_station(db, "93002")
     admin = await create_admin(db)
     node = HeadscaleNode(
@@ -92,8 +92,35 @@ async def test_approval_sets_actor_keeps_headscale_independent_and_writes_audit(
     await db.flush()
 
     preview = await preview_station_approval(station.id, db, admin)
-    assert preview.valid and preview.preview_token
+    assert not preview.valid and preview.preview_token is None
     assert not preview.monitoring_ready
+    assert {item.key for item in preview.checklist if not item.ready} == {
+        "approved_station_node",
+        "monitoring_configured",
+    }
+
+
+@pytest.mark.asyncio
+async def test_approval_accepts_approved_offline_station_node_and_writes_audit(db):
+    station = await create_station(db, "93004")
+    admin = await create_admin(db)
+    node = HeadscaleNode(
+        node_key="approval-offline-node",
+        hostname="approved-offline-node",
+        vpn_ip=station.vpn_ip,
+        station_id=station.id,
+        device_type="station",
+        approval_status="approved",
+        online=False,
+    )
+    db.add(node)
+    await db.flush()
+
+    preview = await preview_station_approval(station.id, db, admin)
+    assert preview.valid and preview.preview_token
+    assert preview.monitoring_ready
+    assert all(item.ready for item in preview.checklist)
+    assert preview.warning and "offline" in preview.warning
     result = await approve_station_for_production(
         station.id,
         StationApprovalApplyIn(preview_token=preview.preview_token, confirmation=preview.confirmation_phrase),
@@ -105,7 +132,7 @@ async def test_approval_sets_actor_keeps_headscale_independent_and_writes_audit(
     await db.refresh(node)
     assert result.approved_at is not None
     assert station.approved_by == admin.id
-    assert node.approval_status == "pending"
+    assert node.approval_status == "approved"
     audit = (await db.execute(select(AuditLog).where(AuditLog.action == "station.production_approve"))).scalar_one()
     assert audit.actor_user_id == admin.id
 

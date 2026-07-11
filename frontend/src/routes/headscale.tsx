@@ -405,6 +405,8 @@ function HeadscalePage() {
               </dd>
               <dt className="text-muted-foreground">VPN IP</dt>
               <dd className="font-mono">{preview.vpn_ip ?? "—"}</dd>
+              <dt className="text-muted-foreground">Current station VPN</dt>
+              <dd className="font-mono">{preview.station_vpn_ip ?? "—"}</dd>
               <dt className="text-muted-foreground">Device type</dt>
               <dd>{preview.device_type.replaceAll("_", " ")}</dd>
               <dt className="text-muted-foreground">Station</dt>
@@ -422,6 +424,12 @@ function HeadscalePage() {
                   : "None"}
               </dd>
             </dl>
+            {preview.vpn_replacement_warning && (
+              <div className="mt-4 rounded border border-warning/40 p-3 text-sm text-warning">
+                <AlertTriangle className="mr-2 inline size-4" />
+                {preview.vpn_replacement_warning}
+              </div>
+            )}
             {preview.errors.length > 0 && (
               <div className="mt-4 rounded border border-destructive/40 p-3 text-sm text-destructive">
                 {preview.errors.join(" · ")}

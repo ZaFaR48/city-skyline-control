@@ -1,11 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Download, ShieldCheck, Upload } from "lucide-react";
+import { AlertTriangle, Check, Copy, Download, ShieldCheck, Upload, Wrench, X } from "lucide-react";
 import { Topbar } from "@/components/Topbar";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
   applyDistrictAssignments,
   applyStationApproval,
+  applyStationRepair,
   applyDistrictCsv,
   applyDuplicateVpnAction,
   downloadDistrictTemplate,
@@ -18,6 +19,7 @@ import {
   previewDistrictCsv,
   previewDuplicateVpnAction,
   previewStationApproval,
+  previewStationRepair,
 } from "@/lib/api";
 import { getStoredUser } from "@/lib/auth";
 import type {
@@ -29,6 +31,7 @@ import type {
   HeadscaleNode,
   Station,
   StationApprovalPreview,
+  StationRepairPreview,
   User,
 } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
@@ -97,6 +100,7 @@ function StationApprovalWorkflow() {
   const [filter, setFilter] = useState<"pending" | "approved" | "all">("pending");
   const [stations, setStations] = useState<Station[]>([]);
   const [preview, setPreview] = useState<StationApprovalPreview | null>(null);
+  const [repairStation, setRepairStation] = useState<Station | null>(null);
   const [confirmation, setConfirmation] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -206,12 +210,20 @@ function StationApprovalWorkflow() {
                 </td>
                 <td>{station.approved_at ? "Approved" : "Pending"}</td>
                 <td className="p-3 text-right">
-                  <button
-                    onClick={() => openPreview(station)}
-                    className={`h-8 px-3 rounded border ${station.approved_at ? "border-warning/40 text-warning" : "border-primary/40 text-primary"}`}
-                  >
-                    {station.approved_at ? "Remove from production" : "Approve station"}
-                  </button>
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={() => setRepairStation(station)}
+                      className="h-8 px-3 rounded border border-border"
+                    >
+                      <Wrench className="mr-1 inline size-3" /> Repair data
+                    </button>
+                    <button
+                      onClick={() => openPreview(station)}
+                      className={`h-8 px-3 rounded border ${station.approved_at ? "border-warning/40 text-warning" : "border-primary/40 text-primary"}`}
+                    >
+                      {station.approved_at ? "Remove from production" : "Approve station"}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -237,6 +249,17 @@ function StationApprovalWorkflow() {
           }}
         />
       )}
+      {repairStation && (
+        <StationRepairDialog
+          station={repairStation}
+          close={() => setRepairStation(null)}
+          applied={async () => {
+            setRepairStation(null);
+            setMessage("Station data repair was applied and audited.");
+            await load();
+          }}
+        />
+      )}
     </section>
   );
 }
@@ -254,14 +277,15 @@ function StationApprovalDialog({
   apply: () => void;
   close: () => void;
 }) {
-  const { district: districtName } = useI18n();
+  const { district: districtName, t } = useI18n();
+  const [copied, setCopied] = useState(false);
   return (
     <div className="fixed inset-0 z-50 bg-black/60 grid place-items-center p-4">
       <div className="glass bg-background rounded-xl p-5 w-full max-w-2xl max-h-[85vh] overflow-y-auto">
         <h2 className="font-semibold">
           {preview.action === "approve" ? "Station approval preview" : "Production removal preview"}
         </h2>
-        <p className="text-xs text-muted-foreground">Read-only preview; no change has been made.</p>
+        <p className="text-xs text-muted-foreground">{t("approval.readOnly")}</p>
         <dl className="grid grid-cols-2 gap-x-5 gap-y-3 text-sm my-5">
           <PreviewValue label="Station code" value={preview.station_code} mono />
           <PreviewValue label="Station name" value={preview.station_name} />
@@ -280,6 +304,19 @@ function StationApprovalDialog({
             value={preview.production_approved ? "Approved" : "Pending"}
           />
         </dl>
+        {preview.action === "approve" && (
+          <div className="mb-4 rounded border border-border p-3">
+            <div className="mb-2 text-xs font-semibold">{t("approval.requirements")}</div>
+            {preview.checklist.map((item) => (
+              <div key={item.key} className="flex items-center justify-between gap-3 py-1 text-sm">
+                <span>{t(`approval.${item.key}`)}</span>
+                <span className={item.ready ? "text-success" : "text-destructive"}>
+                  {item.ready ? t("approval.ready") : t("approval.blocked")}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
         {preview.warning && <Notice>{preview.warning}</Notice>}
         {preview.errors.map((item) => (
           <p key={item} className="mt-2 text-sm text-destructive">
@@ -289,12 +326,26 @@ function StationApprovalDialog({
         {preview.valid && (
           <label className="block text-xs mt-4">
             Type <span className="font-mono">{preview.confirmation_phrase}</span> to confirm
+            <button
+              type="button"
+              onClick={async () => {
+                await navigator.clipboard.writeText(preview.confirmation_phrase);
+                setCopied(true);
+              }}
+              className="ml-2 inline-flex items-center gap-1 text-primary"
+            >
+              <Copy className="size-3" />{" "}
+              {copied ? t("approval.copiedPhrase") : t("approval.copyPhrase")}
+            </button>
             <input
               value={confirmation}
               onChange={(event) => setConfirmation(event.target.value)}
               className="block mt-1 w-full h-9 px-3 bg-input border border-border rounded"
             />
           </label>
+        )}
+        {!preview.valid && (
+          <p className="mt-3 text-xs text-destructive">{t("approval.disabled")}</p>
         )}
         <div className="mt-4 flex justify-end gap-2">
           <button onClick={close} className="h-9 px-4 border border-border rounded">
@@ -306,6 +357,163 @@ function StationApprovalDialog({
             className="h-9 px-4 border border-primary/40 text-primary rounded disabled:opacity-40"
           >
             {preview.action === "approve" ? "Approve station" : "Remove from production"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StationRepairDialog({
+  station,
+  close,
+  applied,
+}: {
+  station: Station;
+  close: () => void;
+  applied: () => Promise<void>;
+}) {
+  const initial = {
+    name: station.name,
+    operational_area: station.operational_area ?? "",
+    address: station.address,
+    vpn_ip: station.vpn_ip ?? "",
+    local_ip: station.local_ip ?? "",
+    latitude: station.latitude === null ? "" : String(station.latitude),
+    longitude: station.longitude === null ? "" : String(station.longitude),
+  };
+  const [form, setForm] = useState(initial);
+  const [preview, setPreview] = useState<StationRepairPreview | null>(null);
+  const [confirmation, setConfirmation] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  function changes(): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
+    (Object.keys(form) as Array<keyof typeof form>).forEach((field) => {
+      if (form[field] === initial[field]) return;
+      if (field === "latitude" || field === "longitude") {
+        result[field] = form[field] === "" ? null : Number(form[field]);
+      } else if (field === "operational_area" || field === "vpn_ip" || field === "local_ip") {
+        result[field] = form[field].trim() || null;
+      } else {
+        result[field] = form[field].trim();
+      }
+    });
+    return result;
+  }
+
+  async function runPreview() {
+    setError(null);
+    setConfirmation("");
+    try {
+      setPreview(await previewStationRepair(station.id, changes()));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Station repair preview failed");
+    }
+  }
+
+  async function applyRepair() {
+    if (!preview?.valid || !preview.preview_token || confirmation !== preview.confirmation_phrase)
+      return;
+    setError(null);
+    try {
+      await applyStationRepair(station.id, changes(), preview.preview_token, confirmation);
+      await applied();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Station repair failed");
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 grid place-items-center p-4">
+      <div className="glass bg-background rounded-xl p-5 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+        <div className="flex items-start justify-between">
+          <div>
+            <h2 className="font-semibold">Repair station data · {station.station_code}</h2>
+            <p className="text-xs text-muted-foreground">
+              Preview OLD → NEW before an audited update.
+            </p>
+          </div>
+          <button onClick={close}>
+            <X className="size-5" />
+          </button>
+        </div>
+        {station.data_quality_warnings.length > 0 && (
+          <div className="my-4 rounded border border-warning/40 p-3 text-sm text-warning">
+            {station.data_quality_warnings.map((warning) => (
+              <div key={warning}>• {warning}</div>
+            ))}
+          </div>
+        )}
+        <div className="my-4 grid gap-3 sm:grid-cols-2">
+          {Object.entries(form).map(([field, value]) => (
+            <label key={field} className="text-xs capitalize">
+              {field.replaceAll("_", " ")}
+              <input
+                type={field === "latitude" || field === "longitude" ? "number" : "text"}
+                step="any"
+                value={value}
+                onChange={(event) => {
+                  setForm((current) => ({ ...current, [field]: event.target.value }));
+                  setPreview(null);
+                }}
+                className="mt-1 block h-9 w-full rounded border border-border bg-input px-3"
+              />
+            </label>
+          ))}
+        </div>
+        {error && <Notice tone="error">{error}</Notice>}
+        {preview && (
+          <div className="space-y-3">
+            <div className="rounded border border-border p-3 text-sm">
+              {preview.changes.map((change) => (
+                <div key={change.field} className="grid grid-cols-[9rem_1fr_auto_1fr] gap-2 py-1">
+                  <span>{change.field}</span>
+                  <code>{String(change.current ?? "—")}</code>
+                  <span>→</span>
+                  <code>{String(change.proposed ?? "—")}</code>
+                </div>
+              ))}
+            </div>
+            {preview.warnings.map((warning) => (
+              <div key={warning} className="text-sm text-warning">
+                <AlertTriangle className="mr-1 inline size-4" />
+                {warning}
+              </div>
+            ))}
+            {preview.errors.map((item) => (
+              <div key={item} className="text-sm text-destructive">
+                {item}
+              </div>
+            ))}
+            {preview.valid && (
+              <label className="block text-xs">
+                Type <code>{preview.confirmation_phrase}</code> to confirm
+                <input
+                  value={confirmation}
+                  onChange={(event) => setConfirmation(event.target.value)}
+                  className="mt-1 block h-9 w-full rounded border border-border bg-input px-3"
+                />
+              </label>
+            )}
+          </div>
+        )}
+        <div className="mt-5 flex justify-end gap-2">
+          <button onClick={close} className="h-9 rounded border border-border px-4">
+            Cancel
+          </button>
+          <button
+            onClick={runPreview}
+            className="h-9 rounded border border-primary/40 px-4 text-primary"
+          >
+            Preview changes
+          </button>
+          <button
+            disabled={!preview?.valid || confirmation !== preview.confirmation_phrase}
+            onClick={applyRepair}
+            className="h-9 rounded bg-primary px-4 text-primary-foreground disabled:opacity-40"
+          >
+            <Check className="mr-1 inline size-4" /> Apply repair
           </button>
         </div>
       </div>

@@ -17,6 +17,7 @@ import type {
   Role,
   Station,
   StationApprovalPreview,
+  StationRepairPreview,
   StationDetail,
   StationList,
   UptimeReportRow,
@@ -228,6 +229,21 @@ export const applyStationApproval = (
       body: JSON.stringify({ preview_token: previewToken, confirmation }),
     },
   );
+export const previewStationRepair = (stationId: number, changes: Record<string, unknown>) =>
+  apiFetch<StationRepairPreview>(`/api/onboarding/stations/${stationId}/repair-preview`, {
+    method: "POST",
+    body: JSON.stringify(changes),
+  });
+export const applyStationRepair = (
+  stationId: number,
+  changes: Record<string, unknown>,
+  previewToken: string,
+  confirmation: string,
+) =>
+  apiFetch<Station>(`/api/onboarding/stations/${stationId}/repair`, {
+    method: "POST",
+    body: JSON.stringify({ ...changes, preview_token: previewToken, confirmation }),
+  });
 export const previewDistrictAssignments = (assignments: DistrictAssignment[]) =>
   apiFetch<DistrictPreview>("/api/onboarding/districts/preview", {
     method: "POST",

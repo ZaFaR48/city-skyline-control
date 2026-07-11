@@ -163,6 +163,68 @@ TEXT = {
     },
 }
 
+TEXT["ru"].update({
+    "wizard_step": "Шаг {step} из 7", "enter_code": "Введите код станции. Например: 10002",
+    "existing_edit_notice": "Станция {code} существует. Вы будете редактировать существующую запись.",
+    "keep_current": "Сохранить текущие данные", "edit_station": "Редактировать данные станции",
+    "no_changes": "Изменения не внесены.", "back": "⬅️ Назад", "select_city": "Выберите город",
+    "city_dushanbe": "Душанбе", "select_district": "Выберите район",
+    "area_prompt": "Введите зону или ориентир. Например: Таможня, Опера, Садбарг",
+    "address_prompt": "Введите точный адрес: улица, дом или ближайший объект.",
+    "keep_existing_field": "Оставить текущее значение", "keep_station_name": "Сохранить название станции",
+    "change_station_name": "Изменить название станции", "use_suggested_name": "Использовать предложенное название",
+    "name_prompt": "Введите короткое отображаемое название станции.",
+    "suggested_name": "Предложенное название: {name}",
+    "gps_prompt": "Отправьте геолокацию или пропустите этот шаг. Без GPS станция не появится на карте.",
+    "skip_now": "Пропустить пока", "diff_title": "Проверьте изменения OLD → NEW:",
+    "no_field_changes": "Изменяемых полей нет.", "save_changes": "Сохранить изменения",
+    "create_station": "Создать станцию", "stale_action": "Эта кнопка устарела. Начните действие заново.",
+    "saving": "Сохранение уже выполняется.",
+    "saved_existing_pending": "Станция {code} обновлена. Она остаётся на рассмотрении для production.",
+    "saved_new_pending": "Станция создана. Она остаётся на рассмотрении для production.",
+    "label_city": "Город", "label_operational_area": "Зона / ориентир",
+})
+TEXT["tj"].update({
+    "wizard_step": "Қадами {step} аз 7", "enter_code": "Коди стансияро ворид кунед. Мисол: 10002",
+    "existing_edit_notice": "Стансияи {code} мавҷуд аст. Сабти мавҷуда таҳрир мешавад.",
+    "keep_current": "Нигоҳ доштани маълумоти ҷорӣ", "edit_station": "Таҳрири маълумоти стансия",
+    "no_changes": "Тағйирот ворид нашуд.", "back": "⬅️ Қафо", "select_city": "Шаҳрро интихоб кунед",
+    "city_dushanbe": "Душанбе", "select_district": "Ноҳияро интихоб кунед",
+    "area_prompt": "Минтақа ё ориентирро ворид кунед. Мисол: Таможня, Опера, Садбарг",
+    "address_prompt": "Суроғаи дақиқро ворид кунед: кӯча, бино ё объекти наздик.",
+    "keep_existing_field": "Нигоҳ доштани арзиши ҷорӣ", "keep_station_name": "Нигоҳ доштани номи стансия",
+    "change_station_name": "Тағйири номи стансия", "use_suggested_name": "Истифодаи номи пешниҳодшуда",
+    "name_prompt": "Номи кӯтоҳи намоишии стансияро ворид кунед.",
+    "suggested_name": "Номи пешниҳодшуда: {name}",
+    "gps_prompt": "Ҷойгиршавиро фиристед ё ҳоло гузаред. Бе GPS стансия дар харита намоиш дода намешавад.",
+    "skip_now": "Ҳоло гузариш", "diff_title": "Тағйироти OLD → NEW-ро санҷед:",
+    "no_field_changes": "Майдони тағйирёбанда нест.", "save_changes": "Сабти тағйирот",
+    "create_station": "Сохтани стансия", "stale_action": "Ин тугма кӯҳна шудааст. Аз нав оғоз кунед.",
+    "saving": "Сабт аллакай иҷро шуда истодааст.",
+    "saved_existing_pending": "Стансияи {code} нав карда шуд. Он барои тасдиқи истеҳсолӣ интизор мемонад.",
+    "saved_new_pending": "Стансия сохта шуд. Он барои тасдиқи истеҳсолӣ интизор мемонад.",
+    "label_city": "Шаҳр", "label_operational_area": "Минтақа / ориентир",
+})
+TEXT["en"].update({
+    "wizard_step": "Step {step} of 7", "enter_code": "Enter the station code. Example: 10002",
+    "existing_edit_notice": "Station {code} exists. You will edit the existing record.",
+    "keep_current": "Keep current data", "edit_station": "Edit station data", "no_changes": "No changes were made.",
+    "back": "⬅️ Back", "select_city": "Select the city", "city_dushanbe": "Dushanbe",
+    "select_district": "Select the district", "area_prompt": "Enter the operational area or landmark.",
+    "address_prompt": "Enter the exact address: street, building, or nearby object.",
+    "keep_existing_field": "Keep current value", "keep_station_name": "Keep station name",
+    "change_station_name": "Change station name", "use_suggested_name": "Use suggested name",
+    "name_prompt": "Enter a short station display name.", "suggested_name": "Suggested name: {name}",
+    "gps_prompt": "Send location or skip for now. Without GPS the station will not appear on the map.",
+    "skip_now": "Skip for now", "diff_title": "Review OLD → NEW changes:",
+    "no_field_changes": "There are no field changes.", "save_changes": "Save changes",
+    "create_station": "Create station", "stale_action": "This button is stale. Start the action again.",
+    "saving": "A save is already in progress.",
+    "saved_existing_pending": "Station {code} was updated. It remains pending production approval.",
+    "saved_new_pending": "Station was created. It remains pending production approval.",
+    "label_city": "City", "label_operational_area": "Operational area / landmark",
+})
+
 
 def lang_or_default(lang: str | None) -> str:
     return lang if lang in TEXT else "tj"

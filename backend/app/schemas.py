@@ -69,6 +69,7 @@ class StationCreate(BaseModel):
     city_id: int
     district_id: int | None = None
     address: str = Field(default="", max_length=255)
+    operational_area: str | None = Field(default=None, max_length=128)
     latitude: float | None = Field(default=None, validation_alias=AliasChoices("latitude", "lat"))
     longitude: float | None = Field(default=None, validation_alias=AliasChoices("longitude", "lng"))
     vpn_ip: str | None = None
@@ -81,6 +82,7 @@ class StationUpdate(BaseModel):
     city_id: int | None = None
     district_id: int | None = None
     address: str | None = Field(default=None, max_length=255)
+    operational_area: str | None = Field(default=None, max_length=128)
     latitude: float | None = None
     longitude: float | None = None
     vpn_ip: str | None = None
@@ -99,6 +101,7 @@ class StationOut(BaseModel):
     district_id: int | None
     district: str | None
     address: str
+    operational_area: str | None
     latitude: float | None
     longitude: float | None
     vpn_ip: str | None
@@ -125,6 +128,7 @@ class StationOut(BaseModel):
     cameras_total: int
     cameras_online: int
     active_alerts: int
+    data_quality_warnings: list[str] = Field(default_factory=list)
 
 
 class StationListOut(BaseModel):
@@ -224,6 +228,8 @@ class HeadscaleApprovalPreviewOut(BaseModel):
     valid: bool
     errors: list[str]
     preview_token: str | None
+    vpn_replacement_warning: str | None = None
+    station_vpn_ip: str | None = None
 
 
 class HeadscaleLinkIn(BaseModel):
@@ -447,11 +453,50 @@ class StationApprovalPreviewOut(BaseModel):
     valid: bool
     errors: list[str]
     preview_token: str | None
+    checklist: list["ApprovalCheckOut"] = Field(default_factory=list)
+
+
+class ApprovalCheckOut(BaseModel):
+    key: str
+    label: str
+    ready: bool
 
 
 class StationApprovalApplyIn(BaseModel):
     preview_token: str
     confirmation: str
+
+
+class StationRepairIn(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    operational_area: str | None = Field(default=None, max_length=128)
+    address: str | None = Field(default=None, max_length=255)
+    vpn_ip: str | None = Field(default=None, max_length=64)
+    local_ip: str | None = Field(default=None, max_length=64)
+    latitude: float | None = None
+    longitude: float | None = None
+
+
+class StationRepairApplyIn(StationRepairIn):
+    preview_token: str
+    confirmation: str
+
+
+class StationRepairChangeOut(BaseModel):
+    field: str
+    current: Any
+    proposed: Any
+
+
+class StationRepairPreviewOut(BaseModel):
+    station_id: int
+    station_code: str
+    changes: list[StationRepairChangeOut]
+    warnings: list[str]
+    errors: list[str]
+    confirmation_phrase: str
+    valid: bool
+    preview_token: str | None
 
 
 class DistrictPreviewIn(BaseModel):
@@ -546,3 +591,4 @@ class DuplicateAlertApplyIn(BaseModel):
 
 
 StationDetailOut.model_rebuild()
+StationApprovalPreviewOut.model_rebuild()
