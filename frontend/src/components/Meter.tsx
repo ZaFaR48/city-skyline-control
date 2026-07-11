@@ -8,7 +8,10 @@ export function Meter({ value, label }: { value: number; label?: string }) {
         <span className="tabular-nums text-foreground">{value}%</span>
       </div>
       <div className="mt-1 h-1.5 rounded-full bg-accent/70 overflow-hidden">
-        <div className={`h-full ${meterColor(value)} transition-all`} style={{ width: `${value}%` }} />
+        <div
+          className={`h-full ${meterColor(value)} transition-all`}
+          style={{ width: `${value}%` }}
+        />
       </div>
     </div>
   );

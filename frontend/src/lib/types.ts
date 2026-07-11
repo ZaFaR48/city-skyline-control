@@ -1,5 +1,7 @@
-export type StationStatus = "online" | "warning" | "offline";
-
+export type StationStatus = "online" | "degraded" | "offline" | "unknown";
+export type Role = "admin" | "operator" | "viewer";
+export type DeviceType = "station" | "operator_pc" | "admin_pc" | "phone" | "server" | "unknown";
+export type ApprovalStatus = "pending" | "approved" | "rejected";
 export type AlertSeverity = "critical" | "warning" | "info";
 export type AlertType =
   | "offline_station"
@@ -9,23 +11,94 @@ export type AlertType =
   | "cpu_high"
   | "ram_high";
 
-export interface Station {
+export interface User {
+  id: number;
+  username: string;
+  email: string;
+  role: Role;
+}
+
+export interface Region {
   id: number;
   code: string;
   name: string;
-  region: string;
+  region_type: "city" | "district" | "operational_zone";
+  parent_id: number | null;
+  is_active: boolean;
+  sort_order: number;
+}
+
+export interface Station {
+  id: number;
+  station_code: string;
+  name: string;
+  city_id: number;
+  city: string;
+  district_id: number | null;
+  district: string | null;
   address: string;
-  vpn_ip: string;
-  local_ip: string;
+  latitude: number | null;
+  longitude: number | null;
+  vpn_ip: string | null;
+  local_ip: string | null;
   rustdesk_id: string | null;
-  lat: number;
-  lng: number;
   status: StationStatus;
-  cpu: number;
-  ram: number;
-  disk: number;
-  last_ping_ms: number;
-  last_seen: string | null;
+  status_reason: string | null;
+  last_seen_at: string | null;
+  last_ping_at: string | null;
+  last_ping_ms: number | null;
+  offline_since: string | null;
+  cpu: number | null;
+  ram: number | null;
+  disk: number | null;
+  telemetry_at: string | null;
+  is_active: boolean;
+  is_archived: boolean;
+  monitoring_configured: boolean;
+  headscale_linked: boolean;
+  headscale_hostname: string | null;
+  cameras_total: number;
+  cameras_online: number;
+  active_alerts: number;
+}
+
+export interface StationList {
+  items: Station[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface PingPoint {
+  latency_ms: number | null;
+  packet_loss: number | null;
+  success: boolean;
+  checked_at: string;
+  error_type: string | null;
+}
+export interface StatusEvent {
+  id: number;
+  previous_status: StationStatus;
+  new_status: StationStatus;
+  source: string;
+  reason: string | null;
+  started_at: string;
+  ended_at: string | null;
+  duration_seconds: number | null;
+}
+export interface AuditEntry {
+  id: number;
+  action: string;
+  timestamp: string;
+  source: string;
+}
+export interface StationDetail extends Station {
+  headscale_node: HeadscaleNode | null;
+  cameras: Camera[];
+  ping_history: PingPoint[];
+  open_alerts: AlertItem[];
+  status_timeline: StatusEvent[];
+  audit_history: AuditEntry[];
 }
 
 export interface Camera {
@@ -38,6 +111,7 @@ export interface Camera {
   resolution: string;
   fps: number;
   status: StationStatus;
+  last_seen_at: string | null;
 }
 
 export interface AlertItem {
@@ -47,36 +121,97 @@ export interface AlertItem {
   severity: AlertSeverity;
   message: string;
   acknowledged: boolean;
+  acknowledged_at: string | null;
   created_at: string;
+  resolved_at: string | null;
 }
 
 export interface HeadscaleNode {
   id: number;
   hostname: string;
-  vpn_ip: string;
+  given_name: string | null;
+  vpn_ip: string | null;
   online: boolean;
-  last_seen: string | null;
+  first_seen_at: string;
+  last_seen_at: string | null;
+  operating_system: string | null;
+  tags: string[] | null;
+  device_type: DeviceType;
+  approval_status: ApprovalStatus;
   station_id: number | null;
+  approved_at: string | null;
 }
 
-export interface StationDetail extends Station {
-  headscale_node: HeadscaleNode | null;
-}
-
-export interface SummaryOut {
-  stations_total: number;
-  stations_online: number;
-  stations_warning: number;
-  stations_offline: number;
-  cameras_total: number;
-  cameras_online: number;
-  alerts_active: number;
-  vpn_nodes: number;
-}
-
-export interface User {
+export interface DistrictHealth {
   id: number;
-  username: string;
-  email: string;
-  role: "admin" | "operator" | "viewer";
+  code: string;
+  name: string;
+  total_stations: number;
+  online: number;
+  offline: number;
+  degraded: number;
+  unknown: number;
+  availability_percentage: number | null;
+}
+
+export interface AttentionStation {
+  station_id: number;
+  station_code: string;
+  name: string;
+  district: string | null;
+  status: StationStatus;
+  vpn_ip: string | null;
+  last_ping_ms: number | null;
+  last_seen_at: string | null;
+  offline_since: string | null;
+  active_alerts: number;
+}
+
+export interface DashboardSummary {
+  total_stations: number;
+  online_stations: number;
+  offline_stations: number;
+  degraded_stations: number;
+  unknown_stations: number;
+  online_percentage: number | null;
+  total_cameras: number | null;
+  online_cameras: number | null;
+  offline_cameras: number | null;
+  camera_monitoring_configured: boolean;
+  active_alerts: number;
+  approved_station_vpn_nodes: number;
+  pending_headscale_nodes: number;
+  district_health: DistrictHealth[];
+  recent_alerts: AlertItem[];
+  top_problem_stations: AttentionStation[];
+}
+
+export interface UptimeReportRow {
+  station_id: number;
+  station_code: string;
+  station_name: string;
+  district: string | null;
+  total_monitored_seconds: number;
+  online_seconds: number;
+  offline_seconds: number;
+  degraded_seconds: number;
+  unknown_seconds: number;
+  availability_percentage: number | null;
+  outages: number;
+  longest_outage_seconds: number;
+  average_outage_seconds: number | null;
+  current_outage_seconds: number | null;
+}
+
+export interface RegistrationRequest {
+  id: number;
+  telegram_user_id: number;
+  telegram_username: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  display_name: string | null;
+  status: string;
+  assigned_role: Role | null;
+  requested_at: string;
+  reviewed_at: string | null;
 }

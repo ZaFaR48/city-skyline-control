@@ -1,173 +1,254 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
-import {
-  Activity, Server, ServerCog, ServerOff, Video, BellRing, Network, Cpu, HardDrive,
-} from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { BellRing, Network, RefreshCw, Server, ServerCog, ServerOff, Video } from "lucide-react";
 import { Topbar } from "@/components/Topbar";
 import { StatCard } from "@/components/StatCard";
-import { StatusBadge, pingTone } from "@/components/StatusBadge";
-import { getDataset, liveTick } from "@/lib/mock-data";
+import { StatusBadge } from "@/components/StatusBadge";
+import { getDashboardSummary } from "@/lib/api";
+import type { DashboardSummary } from "@/lib/types";
 
 export const Route = createFileRoute("/")({
-  head: () => ({
-    meta: [
-      { title: "Dashboard · City Parking Control Center" },
-      { name: "description", content: "Live operational overview of every parking station, camera and VPN node across Tajikistan." },
-    ],
-  }),
+  head: () => ({ meta: [{ title: "Dashboard · City Parking Control Center" }] }),
   component: Dashboard,
 });
 
-function fmtAgo(iso: string) {
-  const s = Math.max(0, Math.floor((Date.now() - +new Date(iso)) / 1000));
-  if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  return `${Math.floor(s / 3600)}h ago`;
+function ago(value: string | null) {
+  if (!value) return "—";
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
+  if (seconds < 60) return `${seconds} seconds ago`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes ago`;
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  return `${hours}h ${minutes}m ago`;
+}
+
+function duration(value: string | null) {
+  if (!value) return "—";
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
 }
 
 function Dashboard() {
-  const [, force] = useState(0);
-  useEffect(() => {
-    const t = setInterval(() => { liveTick(); force((n) => n + 1); }, 10_000);
-    return () => clearInterval(t);
+  const [data, setData] = useState<DashboardSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setData(await getDashboardSummary());
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Dashboard data could not be loaded");
+    } finally {
+      setLoading(false);
+    }
   }, []);
-
-  const { stations, cameras, alerts } = getDataset();
-
-  const stats = useMemo(() => {
-    const online = stations.filter((s) => s.status === "online").length;
-    const warn = stations.filter((s) => s.status === "warning").length;
-    const offline = stations.filter((s) => s.status === "offline").length;
-    const camsOnline = cameras.filter((c) => c.status === "online").length;
-    const active = alerts.filter((a) => !a.acknowledged).length;
-    const avgCpu = Math.round(stations.reduce((a, s) => a + s.cpu, 0) / stations.length);
-    const avgRam = Math.round(stations.reduce((a, s) => a + s.ram, 0) / stations.length);
-    return { online, warn, offline, camsOnline, active, avgCpu, avgRam };
-  }, [stations, cameras, alerts]);
-
-  const recentAlerts = alerts.slice(0, 6);
-  const topStations = [...stations].sort((a, b) => b.cpu - a.cpu).slice(0, 6);
-
-  const regions = useMemo(() => {
-    const map = new Map<string, { online: number; warning: number; offline: number; total: number }>();
-    stations.forEach((s) => {
-      const r = map.get(s.region) ?? { online: 0, warning: 0, offline: 0, total: 0 };
-      r[s.status]++; r.total++;
-      map.set(s.region, r);
-    });
-    return [...map.entries()].sort((a, b) => b[1].total - a[1].total);
-  }, [stations]);
+  useEffect(() => {
+    void load();
+    const timer = window.setInterval(load, 30_000);
+    return () => window.clearInterval(timer);
+  }, [load]);
 
   return (
     <>
-      <Topbar title="Operations Overview" subtitle="Live status across all stations · refresh every 10s" />
-      <div className="flex-1 overflow-y-auto">
-        <div className="p-6 space-y-6">
-          <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
-            <StatCard label="Total Stations" value={stations.length} icon={Server} tone="info" hint="Across 10 regions" />
-            <StatCard label="Online" value={stats.online} icon={ServerCog} tone="success" delta={`${Math.round((stats.online/stations.length)*100)}% availability`} />
-            <StatCard label="Offline" value={stats.offline} icon={ServerOff} tone="danger" delta={`${stats.warn} degraded`} />
-            <StatCard label="Cameras" value={`${stats.camsOnline}/${cameras.length}`} icon={Video} tone="info" hint="Online / total" />
-            <StatCard label="Active Alerts" value={stats.active} icon={BellRing} tone={stats.active > 5 ? "danger" : "warning"} />
-            <StatCard label="VPN Nodes" value={stations.length} icon={Network} tone="success" hint="Headscale mesh" />
-          </div>
-
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-            <div className="glass rounded-xl p-5 xl:col-span-2">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h2 className="text-sm font-semibold">Top Stations by Load</h2>
-                  <p className="text-xs text-muted-foreground">Sorted by CPU pressure</p>
-                </div>
-                <Activity className="size-4 text-muted-foreground" />
-              </div>
-              <div className="space-y-3">
-                {topStations.map((s) => (
-                  <div key={s.id} className="grid grid-cols-12 items-center gap-3 text-sm">
-                    <div className="col-span-3 flex items-center gap-2 min-w-0">
-                      <StatusBadge status={s.status} />
-                      <span className="font-medium truncate">{s.name}</span>
-                    </div>
-                    <div className="col-span-2 font-mono text-xs text-muted-foreground truncate">{s.vpnIp}</div>
-                    <MiniBar icon={Cpu} label="CPU" value={s.cpu} />
-                    <MiniBar icon={Server} label="RAM" value={s.ram} />
-                    <MiniBar icon={HardDrive} label="DSK" value={s.disk} />
-                    <div className={`col-span-1 text-right font-mono text-xs ${pingTone(s.ping, s.status)}`}>{s.ping || "—"}ms</div>
-                  </div>
-                ))}
-              </div>
+      <Topbar title="Operations Overview" subtitle="Dushanbe pilot · verified monitoring data" />
+      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        {loading && !data && <LoadingCards />}
+        {error && <ErrorState message={error} retry={load} />}
+        {data && (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
+              <StatCard
+                label="Total Stations"
+                value={data.total_stations}
+                icon={Server}
+                tone="info"
+                hint="Active Dushanbe stations"
+              />
+              <StatCard
+                label="Online"
+                value={data.online_stations}
+                icon={ServerCog}
+                tone="success"
+                delta={
+                  data.online_percentage === null ? "No data" : `${data.online_percentage}% online`
+                }
+              />
+              <StatCard
+                label="Offline"
+                value={data.offline_stations}
+                icon={ServerOff}
+                tone="danger"
+                delta={`${data.degraded_stations} degraded · ${data.unknown_stations} unknown`}
+              />
+              <StatCard
+                label="Cameras"
+                value={
+                  data.camera_monitoring_configured
+                    ? `${data.online_cameras}/${data.total_cameras}`
+                    : "Not configured"
+                }
+                icon={Video}
+                tone="info"
+                hint={data.camera_monitoring_configured ? "Online / total" : "No monitored cameras"}
+              />
+              <StatCard
+                label="Active Alerts"
+                value={data.active_alerts}
+                icon={BellRing}
+                tone={data.active_alerts ? "warning" : "success"}
+              />
+              <StatCard
+                label="VPN Station Nodes"
+                value={data.approved_station_vpn_nodes}
+                icon={Network}
+                tone="info"
+                hint={`${data.pending_headscale_nodes} pending approval`}
+              />
             </div>
 
-            <div className="glass rounded-xl p-5">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h2 className="text-sm font-semibold">Recent Alerts</h2>
-                  <p className="text-xs text-muted-foreground">Live feed</p>
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+              <section className="glass rounded-xl p-5 xl:col-span-2">
+                <h2 className="text-sm font-semibold">Stations Requiring Attention</h2>
+                <p className="text-xs text-muted-foreground mb-4">
+                  Prioritized from outages, alerts, degraded state, ping, and camera failures
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[760px] text-sm">
+                    <thead className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                      <tr>
+                        <th className="text-left py-2">Status</th>
+                        <th className="text-left">Code / station</th>
+                        <th className="text-left">District</th>
+                        <th className="text-left">VPN IP</th>
+                        <th className="text-right">Ping</th>
+                        <th className="text-right">Offline</th>
+                        <th className="text-right">Alerts</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.top_problem_stations.map((station) => (
+                        <tr key={station.station_id} className="border-t border-border">
+                          <td className="py-3">
+                            <StatusBadge status={station.status} />
+                          </td>
+                          <td>
+                            <div className="font-mono text-xs">{station.station_code}</div>
+                            <div className="max-w-[220px] truncate" title={station.name}>
+                              {station.name}
+                            </div>
+                          </td>
+                          <td className="text-muted-foreground">{station.district ?? "—"}</td>
+                          <td className="font-mono text-xs">{station.vpn_ip ?? "—"}</td>
+                          <td className="text-right font-mono">
+                            {station.last_ping_ms === null ? "—" : `${station.last_ping_ms} ms`}
+                          </td>
+                          <td className="text-right">
+                            {station.status === "offline" ? duration(station.offline_since) : "—"}
+                          </td>
+                          <td className="text-right tabular-nums">{station.active_alerts}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {data.top_problem_stations.length === 0 && (
+                    <Empty text="No stations currently require attention." />
+                  )}
                 </div>
-                <BellRing className="size-4 text-muted-foreground" />
-              </div>
-              <ul className="space-y-3">
-                {recentAlerts.map((a) => (
-                  <li key={a.id} className="flex items-start gap-3 text-sm">
-                    <span className={`mt-1.5 size-2 rounded-full shrink-0 ${
-                      a.severity === "critical" ? "bg-destructive" : a.severity === "warning" ? "bg-warning" : "bg-info"
-                    }`} />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="font-medium truncate">{a.station}</span>
-                        <span className="text-[11px] text-muted-foreground shrink-0">{fmtAgo(a.createdAt)}</span>
+              </section>
+
+              <section className="glass rounded-xl p-5">
+                <h2 className="text-sm font-semibold">Recent Active Alerts</h2>
+                <p className="text-xs text-muted-foreground mb-4">Unresolved monitoring events</p>
+                <ul className="space-y-3">
+                  {data.recent_alerts.map((alert) => (
+                    <li key={alert.id} className="border-b border-border pb-3 last:border-0">
+                      <div className="flex justify-between gap-2">
+                        <span className="text-sm font-medium">
+                          {alert.type.replaceAll("_", " ")}
+                        </span>
+                        <span className="text-[11px] text-muted-foreground">
+                          {ago(alert.created_at)}
+                        </span>
                       </div>
-                      <p className="text-xs text-muted-foreground truncate">{a.message}</p>
-                    </div>
-                  </li>
-                ))}
-                {recentAlerts.length === 0 && <li className="text-sm text-muted-foreground">No active alerts.</li>}
-              </ul>
+                      <p className="text-xs text-muted-foreground line-clamp-2">{alert.message}</p>
+                    </li>
+                  ))}
+                </ul>
+                {data.recent_alerts.length === 0 && <Empty text="No active alerts." />}
+              </section>
             </div>
-          </div>
 
-          <div className="glass rounded-xl p-5">
-            <h2 className="text-sm font-semibold mb-4">Regional Health</h2>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
-              {regions.map(([name, r]) => {
-                const pct = Math.round((r.online / r.total) * 100);
-                return (
-                  <div key={name} className="panel p-3">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium">{name}</span>
-                      <span className="text-xs text-muted-foreground tabular-nums">{r.total}</span>
+            <section className="glass rounded-xl p-5">
+              <h2 className="text-sm font-semibold mb-4">District Health</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                {data.district_health.map((district) => (
+                  <div key={district.id} className="panel p-4">
+                    <div className="flex justify-between">
+                      <span className="font-medium">{district.name}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {district.total_stations} stations
+                      </span>
                     </div>
-                    <div className="mt-2 h-1.5 rounded-full bg-accent overflow-hidden flex">
-                      <span className="bg-success" style={{ width: `${(r.online/r.total)*100}%` }} />
-                      <span className="bg-warning" style={{ width: `${(r.warning/r.total)*100}%` }} />
-                      <span className="bg-destructive" style={{ width: `${(r.offline/r.total)*100}%` }} />
+                    <div className="mt-3 grid grid-cols-4 text-center text-xs gap-1">
+                      <Health value={district.online} label="Online" tone="text-success" />
+                      <Health value={district.degraded} label="Degraded" tone="text-warning" />
+                      <Health value={district.offline} label="Offline" tone="text-destructive" />
+                      <Health
+                        value={district.unknown}
+                        label="Unknown"
+                        tone="text-muted-foreground"
+                      />
                     </div>
-                    <div className="mt-1.5 flex justify-between text-[11px] text-muted-foreground tabular-nums">
-                      <span>{pct}% up</span>
-                      <span>{r.offline} down</span>
+                    <div className="mt-3 text-xs text-muted-foreground">
+                      Availability:{" "}
+                      {district.availability_percentage === null
+                        ? "No data"
+                        : `${district.availability_percentage}%`}
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
+                ))}
+              </div>
+            </section>
+          </>
+        )}
       </div>
     </>
   );
 }
 
-function MiniBar({ icon: Icon, label, value }: { icon: typeof Cpu; label: string; value: number }) {
-  const color = value >= 85 ? "bg-destructive" : value >= 70 ? "bg-warning" : "bg-success";
+function Health({ value, label, tone }: { value: number; label: string; tone: string }) {
   return (
-    <div className="col-span-2">
-      <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-        <span className="flex items-center gap-1"><Icon className="size-3" />{label}</span>
-        <span className="tabular-nums text-foreground">{value}%</span>
-      </div>
-      <div className="mt-1 h-1 rounded-full bg-accent overflow-hidden">
-        <div className={`h-full ${color}`} style={{ width: `${value}%` }} />
-      </div>
+    <div>
+      <div className={`text-lg font-semibold ${tone}`}>{value}</div>
+      <div className="text-[10px] text-muted-foreground">{label}</div>
+    </div>
+  );
+}
+function Empty({ text }: { text: string }) {
+  return <div className="py-8 text-center text-sm text-muted-foreground">{text}</div>;
+}
+function ErrorState({ message, retry }: { message: string; retry: () => void }) {
+  return (
+    <div className="glass rounded-xl border-destructive/40 p-5 flex items-center justify-between gap-3">
+      <span className="text-sm text-destructive">{message}</span>
+      <button
+        onClick={retry}
+        className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-xs"
+      >
+        <RefreshCw className="size-3.5" /> Retry
+      </button>
+    </div>
+  );
+}
+function LoadingCards() {
+  return (
+    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
+      {Array.from({ length: 6 }).map((_, index) => (
+        <div key={index} className="glass h-28 rounded-xl animate-pulse" />
+      ))}
     </div>
   );
 }

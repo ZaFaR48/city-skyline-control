@@ -1,55 +1,50 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Topbar } from "@/components/Topbar";
 
-export const Route = createFileRoute("/settings")({
-  head: () => ({ meta: [{ title: "Settings · City Parking Control Center" }, { name: "description", content: "Authentication, roles, ping thresholds and integrations." }] }),
-  component: SettingsPage,
-});
-
+export const Route = createFileRoute("/settings")({ component: SettingsPage });
+const matrix = [
+  ["Dashboard, map, stations, cameras, alerts, reports", "Yes", "Yes", "Read-only"],
+  ["Create/update station information", "Yes", "Yes", "No"],
+  ["Approve Headscale devices and users", "Yes", "No", "No"],
+  ["Manage users, roles, regions, and security", "Yes", "No", "No"],
+  ["Acknowledge alerts", "Yes", "Yes", "No"],
+  ["Archive stations and resolve alerts", "Yes", "No", "No"],
+];
 function SettingsPage() {
   return (
     <>
-      <Topbar title="Settings" subtitle="System configuration" />
-      <div className="flex-1 overflow-y-auto p-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <Section title="Authentication">
-          <Row label="JWT issuer" value="parking-control.tj" />
-          <Row label="Access token TTL" value="60 minutes" />
-          <Row label="Refresh token TTL" value="30 days" />
-        </Section>
-        <Section title="Roles">
-          <Row label="Admin" value="Full access · 2 users" />
-          <Row label="Operator" value="Manage stations & alerts · 8 users" />
-          <Row label="Viewer" value="Read-only · 14 users" />
-        </Section>
-        <Section title="Ping thresholds">
-          <Row label="Green" value="< 50 ms" />
-          <Row label="Yellow" value="50 – 150 ms" />
-          <Row label="Red" value="> 150 ms" />
-          <Row label="Check interval" value="30 seconds" />
-        </Section>
-        <Section title="System">
-          <Row label="Database" value="PostgreSQL 16 · primary + replica" />
-          <Row label="Backend" value="FastAPI 0.115 · 4 workers" />
-          <Row label="Version" value="v1.0.0" />
-        </Section>
+      <Topbar title="Settings" subtitle="Server-managed security and monitoring policy" />
+      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        <section className="glass rounded-xl p-5">
+          <h2 className="text-sm font-semibold">Monitoring configuration</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Thresholds and integration credentials are configured server-side. Secret values are
+            never displayed in the dashboard.
+          </p>
+        </section>
+        <section className="glass rounded-xl overflow-x-auto">
+          <table className="w-full min-w-[700px] text-sm">
+            <thead className="bg-panel text-left text-xs uppercase text-muted-foreground">
+              <tr>
+                <th className="p-3">Permission</th>
+                <th>ADMIN</th>
+                <th>OPERATOR</th>
+                <th>VIEWER</th>
+              </tr>
+            </thead>
+            <tbody>
+              {matrix.map((row) => (
+                <tr key={row[0]} className="border-t border-border">
+                  <td className="p-3">{row[0]}</td>
+                  <td>{row[1]}</td>
+                  <td>{row[2]}</td>
+                  <td>{row[3]}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
       </div>
     </>
-  );
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div className="glass rounded-xl p-5">
-      <h2 className="text-sm font-semibold mb-3">{title}</h2>
-      <div className="space-y-2">{children}</div>
-    </div>
-  );
-}
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between text-sm py-2 border-b border-border last:border-0">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-medium">{value}</span>
-    </div>
   );
 }

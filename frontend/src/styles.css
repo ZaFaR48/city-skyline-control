@@ -66,10 +66,14 @@
 }
 
 @layer base {
-  html, body, #root {
+  html,
+  body,
+  #root {
     height: 100%;
   }
-  * { border-color: var(--color-border); }
+  * {
+    border-color: var(--color-border);
+  }
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
@@ -79,14 +83,18 @@
     background-attachment: fixed;
     font-feature-settings: "cv11", "ss01";
   }
-  ::selection { background: oklch(0.72 0.17 230 / 35%); }
+  ::selection {
+    background: oklch(0.72 0.17 230 / 35%);
+  }
 }
 
 @utility glass {
   background: linear-gradient(180deg, oklch(0.26 0.025 250 / 65%), oklch(0.22 0.022 250 / 55%));
   backdrop-filter: blur(14px) saturate(140%);
   border: 1px solid oklch(0.4 0.03 250 / 45%);
-  box-shadow: 0 1px 0 oklch(1 0 0 / 4%) inset, 0 8px 30px oklch(0 0 0 / 35%);
+  box-shadow:
+    0 1px 0 oklch(1 0 0 / 4%) inset,
+    0 8px 30px oklch(0 0 0 / 35%);
 }
 
 @utility panel {
@@ -111,8 +119,14 @@
 }
 
 @keyframes pulse-ring {
-  0% { box-shadow: 0 0 0 0 currentColor; opacity: 0.6; }
-  100% { box-shadow: 0 0 0 8px transparent; opacity: 0; }
+  0% {
+    box-shadow: 0 0 0 0 currentColor;
+    opacity: 0.6;
+  }
+  100% {
+    box-shadow: 0 0 0 8px transparent;
+    opacity: 0;
+  }
 }
 
 @utility pulse-dot {

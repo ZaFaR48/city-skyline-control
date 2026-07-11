@@ -1,7 +1,17 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
-  LayoutDashboard, Server, Video, Map as MapIcon, BellRing,
-  BarChart3, Monitor, Network, Send, Workflow, Settings as SettingsIcon, ShieldCheck,
+  LayoutDashboard,
+  Server,
+  Video,
+  Map as MapIcon,
+  BellRing,
+  BarChart3,
+  Monitor,
+  Network,
+  Send,
+  Workflow,
+  Settings as SettingsIcon,
+  ShieldCheck,
 } from "lucide-react";
 
 type NavItem = { to: string; label: string; icon: typeof LayoutDashboard; exact?: boolean };
@@ -11,7 +21,7 @@ const NAV: NavItem[] = [
   { to: "/cameras", label: "Cameras", icon: Video },
   { to: "/map", label: "Map", icon: MapIcon },
   { to: "/alerts", label: "Alerts", icon: BellRing },
-  { to: "/analytics", label: "Analytics", icon: BarChart3 },
+  { to: "/analytics", label: "Reports", icon: BarChart3 },
   { to: "/rustdesk", label: "RustDesk", icon: Monitor },
   { to: "/headscale", label: "Headscale", icon: Network },
   { to: "/telegram", label: "Telegram", icon: Send },
@@ -28,7 +38,9 @@ export function Sidebar() {
           <ShieldCheck className="size-5 text-primary-foreground" />
         </div>
         <div className="leading-tight">
-          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">City Parking</div>
+          <div className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+            City Parking
+          </div>
           <div className="text-sm font-semibold text-gradient">Control Center</div>
         </div>
       </div>
@@ -56,7 +68,9 @@ export function Sidebar() {
       <div className="p-3 border-t border-border text-[11px] text-muted-foreground">
         <div className="flex items-center justify-between">
           <span>v1.0.0 · TJ-NOC</span>
-          <span className="flex items-center gap-1.5"><span className="size-1.5 rounded-full bg-success" /> healthy</span>
+          <span className="flex items-center gap-1.5">
+            <span className="size-1.5 rounded-full bg-success" /> healthy
+          </span>
         </div>
       </div>
     </aside>

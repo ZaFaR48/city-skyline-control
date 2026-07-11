@@ -37,13 +37,7 @@ function NotFoundComponent() {
   );
 }
 
-function ErrorComponent({
-  error,
-  reset,
-}: {
-  error: Error;
-  reset: () => void;
-}) {
+function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   console.error(error);
 
   const router = useRouter();
@@ -57,13 +51,9 @@ function ErrorComponent({
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
-        <h1 className="text-xl font-semibold">
-          This page didn't load
-        </h1>
+        <h1 className="text-xl font-semibold">This page didn't load</h1>
 
-        <p className="mt-2 text-sm text-muted-foreground">
-          Something went wrong on our end.
-        </p>
+        <p className="mt-2 text-sm text-muted-foreground">Something went wrong on our end.</p>
 
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           <button
@@ -88,33 +78,28 @@ function ErrorComponent({
   );
 }
 
-export const Route =
-  createRootRouteWithContext<{
-    queryClient: QueryClient;
-  }>()({
-    head: () => ({
-      meta: [
-        { charSet: "utf-8" },
-        {
-          name: "viewport",
-          content: "width=device-width, initial-scale=1",
-        },
-        { title: "City Parking Control Center" },
-      ],
-      links: [{ rel: "stylesheet", href: appCss }],
-    }),
+export const Route = createRootRouteWithContext<{
+  queryClient: QueryClient;
+}>()({
+  head: () => ({
+    meta: [
+      { charSet: "utf-8" },
+      {
+        name: "viewport",
+        content: "width=device-width, initial-scale=1",
+      },
+      { title: "City Parking Control Center" },
+    ],
+    links: [{ rel: "stylesheet", href: appCss }],
+  }),
 
-    shellComponent: RootShell,
-    component: RootComponent,
-    notFoundComponent: NotFoundComponent,
-    errorComponent: ErrorComponent,
-  });
+  shellComponent: RootShell,
+  component: RootComponent,
+  notFoundComponent: NotFoundComponent,
+  errorComponent: ErrorComponent,
+});
 
-function RootShell({
-  children,
-}: {
-  children: ReactNode;
-}) {
+function RootShell({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className="dark">
       <head>
@@ -134,27 +119,20 @@ function RootComponent() {
 
   const navigate = useNavigate();
 
-  const pathname =
-    typeof window !== "undefined"
-      ? window.location.pathname
-      : "/";
+  const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
 
-  const isLoginPage = pathname === "/login";
+  const isPublicPage = pathname === "/login" || pathname === "/activate";
 
   useEffect(() => {
-    if (
-      !isLoginPage &&
-      typeof window !== "undefined" &&
-      !isAuthenticated()
-    ) {
+    if (!isPublicPage && typeof window !== "undefined" && !isAuthenticated()) {
       navigate({ to: "/login" });
     }
-  }, [navigate, isLoginPage]);
+  }, [navigate, isPublicPage]);
 
   return (
     <QueryClientProvider client={queryClient}>
       <div className="flex h-screen w-full overflow-hidden">
-        {!isLoginPage && <Sidebar />}
+        {!isPublicPage && <Sidebar />}
 
         <div className="flex-1 flex flex-col min-w-0">
           <Outlet />
