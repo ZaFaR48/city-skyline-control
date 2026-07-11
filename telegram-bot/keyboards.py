@@ -23,16 +23,10 @@ def main_keyboard(lang: str = "tj", is_admin: bool = False) -> ReplyKeyboardMark
     ]
     if is_admin:
         rows.append(["pending_users"])
-    rows.extend([["my_status", "request_access"], ["help_access"]])
-    labels = {
-        "pending_users": "Pending users",
-        "my_status": "My status",
-        "request_access": "Request access",
-        "help_access": "Help",
-    }
+    rows.extend([["my_access", "request_access"], ["help_access"]])
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=labels[key] if key in labels else menu_label(lang, key)) for key in row]
+            [KeyboardButton(text=t(lang, key) if key in {"pending_users", "my_access", "request_access", "help_access"} else menu_label(lang, key)) for key in row]
             for row in rows
         ],
         resize_keyboard=True,
@@ -73,32 +67,20 @@ def location_keyboard(lang: str = "tj") -> ReplyKeyboardMarkup:
     )
 
 
-def qr_keyboard(lang: str = "tj") -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=t(lang, "generate_qr"))],
-            [KeyboardButton(text=t(lang, "skip"))],
-            [KeyboardButton(text=t(lang, "cancel"))],
-        ],
-        resize_keyboard=True,
-    )
-
-
-def nfc_keyboard(lang: str = "tj") -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=t(lang, "assign_nfc"))],
-            [KeyboardButton(text=t(lang, "skip"))],
-            [KeyboardButton(text=t(lang, "cancel"))],
-        ],
-        resize_keyboard=True,
-    )
-
-
 def confirm_keyboard(lang: str = "tj") -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=t(lang, "save"))],
+            [KeyboardButton(text=t(lang, "cancel"))],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def approved_update_keyboard(lang: str = "tj") -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=t(lang, "confirm_approved_update"))],
             [KeyboardButton(text=t(lang, "cancel"))],
         ],
         resize_keyboard=True,

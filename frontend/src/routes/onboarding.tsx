@@ -31,6 +31,7 @@ import type {
   StationApprovalPreview,
   User,
 } from "@/lib/types";
+import { useI18n } from "@/lib/i18n";
 
 export const Route = createFileRoute("/onboarding")({
   head: () => ({ meta: [{ title: "Onboarding · City Parking Control Center" }] }),
@@ -92,6 +93,7 @@ function OnboardingPage() {
 }
 
 function StationApprovalWorkflow() {
+  const { district: districtName } = useI18n();
   const [filter, setFilter] = useState<"pending" | "approved" | "all">("pending");
   const [stations, setStations] = useState<Station[]>([]);
   const [preview, setPreview] = useState<StationApprovalPreview | null>(null);
@@ -191,7 +193,7 @@ function StationApprovalWorkflow() {
               <tr key={station.id} className="border-t border-border">
                 <td className="p-3 font-mono">{station.station_code}</td>
                 <td>{station.name}</td>
-                <td>{station.district ?? "—"}</td>
+                <td>{districtName(station.district)}</td>
                 <td className="max-w-[260px] truncate" title={station.address}>
                   {station.address || "—"}
                 </td>
@@ -252,6 +254,7 @@ function StationApprovalDialog({
   apply: () => void;
   close: () => void;
 }) {
+  const { district: districtName } = useI18n();
   return (
     <div className="fixed inset-0 z-50 bg-black/60 grid place-items-center p-4">
       <div className="glass bg-background rounded-xl p-5 w-full max-w-2xl max-h-[85vh] overflow-y-auto">
@@ -262,7 +265,7 @@ function StationApprovalDialog({
         <dl className="grid grid-cols-2 gap-x-5 gap-y-3 text-sm my-5">
           <PreviewValue label="Station code" value={preview.station_code} mono />
           <PreviewValue label="Station name" value={preview.station_name} />
-          <PreviewValue label="District" value={preview.district} />
+          <PreviewValue label="District" value={districtName(preview.district)} />
           <PreviewValue label="Address" value={preview.address} />
           <PreviewValue label="VPN IP" value={preview.vpn_ip} mono />
           <PreviewValue label="Linked Headscale node" value={preview.headscale_hostname} />
@@ -328,6 +331,7 @@ function PreviewValue({
 }
 
 function DistrictWorkflow() {
+  const { district: districtName } = useI18n();
   const [stations, setStations] = useState<Station[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [district, setDistrict] = useState(DISTRICTS[0]);
@@ -423,7 +427,9 @@ function DistrictWorkflow() {
             className="block mt-1 h-9 px-3 rounded bg-input border border-border"
           >
             {DISTRICTS.map((item) => (
-              <option key={item}>{item}</option>
+              <option key={item} value={item}>
+                {districtName(item)}
+              </option>
             ))}
           </select>
         </label>
@@ -484,7 +490,7 @@ function DistrictWorkflow() {
                 <td className="max-w-[260px] truncate" title={station.address}>
                   {station.address || "—"}
                 </td>
-                <td>{station.district ?? "—"}</td>
+                <td>{districtName(station.district)}</td>
                 <td className="font-mono text-xs">{station.vpn_ip ?? "—"}</td>
                 <td>{station.headscale_hostname ?? "—"}</td>
               </tr>
@@ -521,6 +527,7 @@ function PreviewDialog({
   apply: () => void;
   close: () => void;
 }) {
+  const { district: districtName } = useI18n();
   return (
     <div className="fixed inset-0 z-50 bg-black/60 grid place-items-center p-4">
       <div className="glass bg-background rounded-xl p-5 w-full max-w-4xl max-h-[85vh] overflow-y-auto">
@@ -550,8 +557,8 @@ function PreviewDialog({
               <tr key={row.station_id} className="border-t border-border">
                 <td className="py-2 font-mono">{row.station_code}</td>
                 <td>{row.station_name}</td>
-                <td>{row.current_district ?? "—"}</td>
-                <td>{row.proposed_district}</td>
+                <td>{districtName(row.current_district)}</td>
+                <td>{districtName(row.proposed_district)}</td>
                 <td>{row.changed ? "Yes" : "No"}</td>
               </tr>
             ))}

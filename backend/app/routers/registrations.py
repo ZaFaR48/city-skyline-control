@@ -21,6 +21,9 @@ from ..models import (
 )
 from ..schemas import (
     ActivationIn,
+    ActivationOut,
+    PasswordResetApplyIn,
+    PasswordResetPreviewOut,
     RegistrationOut,
     RegistrationPreApproveIn,
     RegistrationReviewIn,
@@ -32,7 +35,7 @@ from ..schemas import (
 )
 from ..security import hash_password
 from ..services.audit import add_audit
-from ..services.registration import create_activation, hash_activation_code
+from ..services.registration import create_activation, create_user_reset_token, hash_activation_code
 from ..services.confirmation_tokens import create_confirmation_token, verify_confirmation_token
 from ..services.telegram import send_telegram_to
 
@@ -57,6 +60,8 @@ async def telegram_start(
             status=RegistrationStatus.activated if user and user.is_active else RegistrationStatus.approved,
             username=user.username if user else None,
             role=user.role if user else None,
+            is_active=user.is_active if user else None,
+            activation_required=bool(user and not user.is_active),
         )
 
     registration = (
@@ -89,9 +94,25 @@ async def telegram_start(
             source=AuditSource.telegram,
         )
         await db.commit()
-        return RegistrationStatusOut(status=RegistrationStatus.approved, username=user.username, role=user.role, activation_code=code, expires_at=expires_at)
+        return RegistrationStatusOut(
+            status=RegistrationStatus.approved,
+            username=user.username,
+            role=user.role,
+            is_active=user.is_active,
+            activation_required=True,
+            activation_code=code,
+            activation_url=f"{settings.PUBLIC_WEB_URL}/activate?code={code}",
+            expires_at=expires_at,
+        )
+    linked_user = await db.get(User, registration.user_id) if registration.user_id else None
     await db.commit()
-    return RegistrationStatusOut(status=registration.status)
+    return RegistrationStatusOut(
+        status=registration.status,
+        username=linked_user.username if linked_user else None,
+        role=linked_user.role if linked_user else registration.assigned_role,
+        is_active=linked_user.is_active if linked_user else None,
+        activation_required=bool(linked_user and not linked_user.is_active),
+    )
 
 
 @router.get("", response_model=list[RegistrationOut])
@@ -180,6 +201,59 @@ async def link_registration_to_existing_user(
     return {"status": "activated", "user_id": preview.user_id, "notification_sent": notification_sent}
 
 
+@router.post("/{registration_id}/password-reset-preview", response_model=PasswordResetPreviewOut)
+async def preview_password_reset(
+    registration_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(Role.admin)),
+):
+    registration = await _registration_or_404(db, registration_id)
+    return await _password_reset_preview(db, registration)
+
+
+@router.post("/{registration_id}/password-reset")
+async def initiate_password_reset(
+    registration_id: int,
+    data: PasswordResetApplyIn,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    actor: User = Depends(require_roles(Role.admin)),
+):
+    registration = await _registration_or_404(db, registration_id)
+    preview = await _password_reset_preview(db, registration)
+    if not preview.valid or not preview.preview_token:
+        raise HTTPException(422, preview.errors)
+    if data.confirmation != preview.confirmation_phrase:
+        raise HTTPException(422, "Explicit password reset confirmation is required")
+    payload = _password_reset_payload(registration, preview)
+    if not verify_confirmation_token(data.preview_token, "telegram-password-reset", payload):
+        raise HTTPException(409, "Password reset preview expired or account state changed; preview again")
+    user = await db.get(User, registration.user_id)
+    if not user:
+        raise HTTPException(409, "Linked system user no longer exists")
+    code, expires_at = create_user_reset_token(db, user)
+    add_audit(
+        db,
+        action="registration.password_reset_initiate",
+        entity_type="user_registration_request",
+        entity_id=registration.id,
+        actor=actor,
+        after={"user_id": user.id, "username": user.username, "expires_at": expires_at},
+        request=request,
+    )
+    await db.commit()
+    try:
+        notification_sent = await send_telegram_to(
+            registration.telegram_user_id,
+            f"City Parking password reset requested.\nUsername: {user.username}\n"
+            f"Role: {user.role}\nReset link: {settings.PUBLIC_WEB_URL}/activate?code={code}\n"
+            "Use this exact username on the login page. This single-use link expires soon.",
+        )
+    except Exception:
+        notification_sent = False
+    return {"status": "sent", "username": user.username, "expires_at": expires_at, "notification_sent": notification_sent}
+
+
 @router.post("/preapprove", response_model=RegistrationOut, status_code=201)
 async def preapprove(
     data: RegistrationPreApproveIn,
@@ -250,7 +324,16 @@ async def review_registration(
         registration.assigned_role = data.role.value
         user, code, expires_at = await create_activation(db, registration)
         action = "registration.approve"
-        result = RegistrationStatusOut(status=RegistrationStatus.approved, username=user.username, activation_code=code, expires_at=expires_at)
+        result = RegistrationStatusOut(
+            status=RegistrationStatus.approved,
+            username=user.username,
+            role=user.role,
+            is_active=user.is_active,
+            activation_required=True,
+            activation_code=code,
+            activation_url=f"{settings.PUBLIC_WEB_URL}/activate?code={code}",
+            expires_at=expires_at,
+        )
 
     add_audit(db, action=action, entity_type="user_registration_request", entity_id=registration.id, actor=actor, before=before, after={"status": registration.status, "assigned_role": registration.assigned_role}, request=request)
     await db.commit()
@@ -258,13 +341,15 @@ async def review_registration(
         await send_telegram_to(
             registration.telegram_user_id,
             f"City Parking access approved.\nUsername: {result.username}\n"
+            f"Role: {result.role.value if result.role else 'viewer'}\n"
             f"Activation: {settings.PUBLIC_WEB_URL}/activate?code={result.activation_code}\n"
-            f"This single-use code expires in {settings.ACTIVATION_TOKEN_TTL_MINUTES} minutes.",
+            "Use this exact username on the login page after activation.\n"
+            f"This single-use link expires in {settings.ACTIVATION_TOKEN_TTL_MINUTES} minutes.",
         )
     return result
 
 
-@router.post("/activate")
+@router.post("/activate", response_model=ActivationOut)
 async def activate_account(data: ActivationIn, db: AsyncSession = Depends(get_db)):
     token = (
         await db.execute(
@@ -298,7 +383,7 @@ async def activate_account(data: ActivationIn, db: AsyncSession = Depends(get_db
         registration.status = RegistrationStatus.activated.value
     add_audit(db, action="user.activate", entity_type="user", entity_id=user.id, actor=None, after={"is_active": True}, source=AuditSource.web)
     await db.commit()
-    return {"status": "activated", "username": user.username}
+    return ActivationOut(status="activated", username=user.username, role=user.role, is_active=user.is_active)
 
 
 async def _registration_or_404(db: AsyncSession, registration_id: int) -> UserRegistrationRequest:
@@ -374,6 +459,57 @@ def _existing_user_link_payload(
         "registration_user_id": registration.user_id,
         "telegram_user_id": registration.telegram_user_id,
         "user_id": preview.user_id,
+        "username": preview.username,
+        "role": preview.role.value,
+        "is_active": preview.is_active,
+    }
+
+
+async def _password_reset_preview(
+    db: AsyncSession,
+    registration: UserRegistrationRequest,
+) -> PasswordResetPreviewOut:
+    user = await db.get(User, registration.user_id) if registration.user_id else None
+    identity = (
+        await db.execute(
+            select(TelegramIdentity).where(
+                TelegramIdentity.telegram_user_id == registration.telegram_user_id
+            )
+        )
+    ).scalar_one_or_none()
+    errors: list[str] = []
+    if not user or not identity or identity.user_id != registration.user_id:
+        errors.append("Registration is not linked to a system user")
+    username = user.username if user else "unknown"
+    phrase = f"SEND PASSWORD RESET TO {username}"
+    preview = PasswordResetPreviewOut(
+        registration_id=registration.id,
+        telegram_user_id=registration.telegram_user_id,
+        username=username,
+        role=user.role if user else Role.viewer,
+        is_active=bool(user and user.is_active),
+        confirmation_phrase=phrase,
+        valid=not errors,
+        errors=errors,
+        preview_token=None,
+    )
+    if preview.valid:
+        preview.preview_token = create_confirmation_token(
+            "telegram-password-reset",
+            _password_reset_payload(registration, preview),
+        )
+    return preview
+
+
+def _password_reset_payload(
+    registration: UserRegistrationRequest,
+    preview: PasswordResetPreviewOut,
+) -> dict[str, object]:
+    return {
+        "registration_id": registration.id,
+        "registration_status": registration.status,
+        "user_id": registration.user_id,
+        "telegram_user_id": registration.telegram_user_id,
         "username": preview.username,
         "role": preview.role.value,
         "is_active": preview.is_active,

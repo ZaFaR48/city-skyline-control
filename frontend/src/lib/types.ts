@@ -277,6 +277,18 @@ export interface TelegramLinkPreview {
   preview_token: string | null;
 }
 
+export interface PasswordResetPreview {
+  registration_id: number;
+  telegram_user_id: number;
+  username: string;
+  role: Role;
+  is_active: boolean;
+  confirmation_phrase: string;
+  valid: boolean;
+  errors: string[];
+  preview_token: string | null;
+}
+
 export interface DistrictAssignment {
   station_code: string;
   district: string;

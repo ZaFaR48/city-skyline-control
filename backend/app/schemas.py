@@ -351,7 +351,10 @@ class RegistrationStatusOut(BaseModel):
     username: str | None = None
     role: Role | None = None
     activation_code: str | None = None
+    activation_url: str | None = None
     expires_at: datetime | None = None
+    is_active: bool | None = None
+    activation_required: bool = False
 
 
 class TelegramLinkPreviewIn(BaseModel):
@@ -378,9 +381,33 @@ class TelegramLinkPreviewOut(BaseModel):
     preview_token: str | None
 
 
+class PasswordResetPreviewOut(BaseModel):
+    registration_id: int
+    telegram_user_id: int
+    username: str
+    role: Role
+    is_active: bool
+    confirmation_phrase: str
+    valid: bool
+    errors: list[str]
+    preview_token: str | None
+
+
+class PasswordResetApplyIn(BaseModel):
+    preview_token: str
+    confirmation: str
+
+
 class ActivationIn(BaseModel):
     code: str = Field(min_length=20, max_length=256)
     password: str = Field(min_length=12, max_length=256)
+
+
+class ActivationOut(BaseModel):
+    status: Literal["activated"]
+    username: str
+    role: Role
+    is_active: bool
 
 
 class AuditLogOut(ORMModel):

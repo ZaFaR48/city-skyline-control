@@ -1,19 +1,29 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, Check, Link2, X } from "lucide-react";
+import { AlertTriangle, Check, KeyRound, Link2, X } from "lucide-react";
 import { Topbar } from "@/components/Topbar";
 import {
   getRegistrations,
   getUsers,
+  initiateTelegramPasswordReset,
   linkRegistrationToExistingUser,
   previewExistingUserLink,
+  previewTelegramPasswordReset,
   reviewRegistration,
 } from "@/lib/api";
 import { getStoredUser } from "@/lib/auth";
-import type { RegistrationRequest, Role, TelegramLinkPreview, User } from "@/lib/types";
+import type {
+  PasswordResetPreview,
+  RegistrationRequest,
+  Role,
+  TelegramLinkPreview,
+  User,
+} from "@/lib/types";
+import { useI18n } from "@/lib/i18n";
 
 export const Route = createFileRoute("/telegram")({ component: TelegramPage });
 function TelegramPage() {
+  const { role: roleLabel } = useI18n();
   const user = getStoredUser<User>();
   const [rows, setRows] = useState<RegistrationRequest[]>([]);
   const [systemUsers, setSystemUsers] = useState<User[]>([]);
@@ -22,6 +32,8 @@ function TelegramPage() {
   const [selectedUsers, setSelectedUsers] = useState<Record<number, string>>({});
   const [linkPreview, setLinkPreview] = useState<TelegramLinkPreview | null>(null);
   const [confirmation, setConfirmation] = useState("");
+  const [resetPreview, setResetPreview] = useState<PasswordResetPreview | null>(null);
+  const [resetConfirmation, setResetConfirmation] = useState("");
   const load = useCallback(() => {
     if (user?.role !== "admin") return;
     Promise.all([getRegistrations(), getUsers()])
@@ -75,6 +87,29 @@ function TelegramPage() {
       load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Existing-user link failed");
+    }
+  }
+  async function previewReset(registrationId: number) {
+    try {
+      setResetPreview(await previewTelegramPasswordReset(registrationId));
+      setResetConfirmation("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Password reset preview failed");
+    }
+  }
+  async function applyReset() {
+    if (!resetPreview?.preview_token || resetConfirmation !== resetPreview.confirmation_phrase)
+      return;
+    try {
+      await initiateTelegramPasswordReset(
+        resetPreview.registration_id,
+        resetPreview.preview_token,
+        resetConfirmation,
+      );
+      setResetPreview(null);
+      setResetConfirmation("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Password reset initiation failed");
     }
   }
   return (
@@ -131,7 +166,7 @@ function TelegramPage() {
                               <option value="">Select existing user…</option>
                               {systemUsers.map((systemUser) => (
                                 <option key={systemUser.id} value={systemUser.id}>
-                                  {systemUser.username} · {systemUser.role.toUpperCase()} ·{" "}
+                                  {systemUser.username} · {roleLabel(systemUser.role)} ·{" "}
                                   {systemUser.is_active ? "active" : "inactive"}
                                 </option>
                               ))}
@@ -165,8 +200,10 @@ function TelegramPage() {
                             <option value="operator">OPERATOR</option>
                             <option value="viewer">VIEWER</option>
                           </select>
+                        ) : row.assigned_role ? (
+                          roleLabel(row.assigned_role)
                         ) : (
-                          (row.assigned_role?.toUpperCase() ?? "—")
+                          "—"
                         )}
                       </td>
                       <td className="p-3 text-right">
@@ -185,6 +222,14 @@ function TelegramPage() {
                               <X className="size-4" />
                             </button>
                           </div>
+                        )}
+                        {row.status === "activated" && (
+                          <button
+                            onClick={() => previewReset(row.id)}
+                            className="h-8 px-2 inline-flex items-center gap-1 border border-warning/40 text-warning rounded"
+                          >
+                            <KeyRound className="size-3" /> Send password reset
+                          </button>
                         )}
                       </td>
                     </tr>
@@ -218,7 +263,7 @@ function TelegramPage() {
                       }
                     />
                     <PreviewValue label="System username" value={linkPreview.username} />
-                    <PreviewValue label="Current role" value={linkPreview.role.toUpperCase()} />
+                    <PreviewValue label="Current role" value={roleLabel(linkPreview.role)} />
                     <PreviewValue
                       label="Active status"
                       value={linkPreview.is_active ? "Active" : "Inactive"}
@@ -260,6 +305,61 @@ function TelegramPage() {
                       className="h-9 px-4 border border-primary/40 text-primary rounded disabled:opacity-40"
                     >
                       Link to existing user
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {resetPreview && (
+              <div className="fixed inset-0 z-50 bg-black/60 grid place-items-center p-4">
+                <div className="glass bg-background rounded-xl p-5 w-full max-w-lg">
+                  <h2 className="font-semibold">Password reset preview</h2>
+                  <p className="text-xs text-muted-foreground">
+                    A single-use reset link will be sent. No permanent password is sent.
+                  </p>
+                  <dl className="grid grid-cols-2 gap-3 text-sm my-5">
+                    <PreviewValue label="System username" value={resetPreview.username} />
+                    <PreviewValue label="Current role" value={roleLabel(resetPreview.role)} />
+                    <PreviewValue
+                      label="Active status"
+                      value={resetPreview.is_active ? "Active" : "Inactive"}
+                    />
+                    <PreviewValue
+                      label="Telegram ID"
+                      value={String(resetPreview.telegram_user_id)}
+                    />
+                  </dl>
+                  {resetPreview.errors.map((item) => (
+                    <p key={item} className="text-sm text-destructive">
+                      {item}
+                    </p>
+                  ))}
+                  {resetPreview.valid && (
+                    <label className="block text-xs">
+                      Type <span className="font-mono">{resetPreview.confirmation_phrase}</span>
+                      <input
+                        value={resetConfirmation}
+                        onChange={(event) => setResetConfirmation(event.target.value)}
+                        className="block mt-1 w-full h-9 px-3 bg-input border border-border rounded"
+                      />
+                    </label>
+                  )}
+                  <div className="mt-4 flex justify-end gap-2">
+                    <button
+                      onClick={() => setResetPreview(null)}
+                      className="h-9 px-4 border border-border rounded"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      disabled={
+                        !resetPreview.valid ||
+                        resetConfirmation !== resetPreview.confirmation_phrase
+                      }
+                      onClick={applyReset}
+                      className="h-9 px-4 border border-warning/40 text-warning rounded disabled:opacity-40"
+                    >
+                      Send single-use reset link
                     </button>
                   </div>
                 </div>

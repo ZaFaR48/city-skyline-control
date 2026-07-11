@@ -6,7 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from api import BackendAPIError, api
-from i18n import t
+from i18n import all_texts, t
 from keyboards import language_keyboard, main_keyboard, registration_review_keyboard
 
 
@@ -32,10 +32,10 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         return
     if status == "approved" and result.get("activation_code"):
         await message.answer(
-            "Your access has been approved.\n"
-            f"Username: {result.get('username')}\n"
-            f"One-time activation code: {result['activation_code']}\n"
-            "Open the activation link provided by City Parking. The code expires in 15 minutes."
+            f"System username: {result.get('username')}\n"
+            f"Role: {result.get('role') or 'viewer'}\n"
+            f"Activation URL: {result.get('activation_url')}\n"
+            "Use this exact username on the login page after activation. The link is single-use."
         )
         return
     if status == "pending":
@@ -49,17 +49,19 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
 
 
 @router.message(Command("status"))
-@router.message(F.text == "My status")
+@router.message(Command("access"))
+@router.message(lambda message: message.text in all_texts("my_access"))
 async def my_status(message: Message, state: FSMContext) -> None:
     if message.from_user is None:
         return
     result = await _registration(message)
     if result is not None:
         await state.update_data(access_status=result.get("status"), role=result.get("role"))
-        await message.answer(f"Registration status: {str(result.get('status', 'unknown')).replace('_', ' ')}")
+        lang = (await state.get_data()).get("lang", "tj")
+        await message.answer(_access_text(lang, result))
 
 
-@router.message(F.text == "Request access")
+@router.message(lambda message: message.text in all_texts("request_access"))
 async def request_access(message: Message) -> None:
     if message.from_user is None:
         return
@@ -69,12 +71,12 @@ async def request_access(message: Message) -> None:
 
 
 @router.message(Command("help"))
-@router.message(F.text == "Help")
+@router.message(lambda message: message.text in all_texts("help_access"))
 async def access_help(message: Message) -> None:
     await message.answer("Use /start to register, My status to check access, or contact a City Parking administrator.")
 
 
-@router.message(F.text == "Pending users")
+@router.message(lambda message: message.text in all_texts("pending_users"))
 async def pending_users(message: Message) -> None:
     if not await _is_admin(message):
         await message.answer("Administrator access required.")
@@ -138,3 +140,18 @@ async def _is_admin(message: Message, user=None) -> bool:
     except BackendAPIError:
         return False
     return result.get("status") == "activated" and result.get("role") == "admin"
+
+
+def _access_text(lang: str, result: dict) -> str:
+    role = str(result.get("role") or "viewer")
+    activation = t(lang, "activation_required") if result.get("activation_required") else t(lang, "activation_not_required")
+    return "\n".join(
+        [
+            t(lang, "access_title"),
+            f"{t(lang, 'access_username')}: {result.get('username') or '—'}",
+            f"{t(lang, 'access_role')}: {t(lang, f'role_{role}')}",
+            f"{t(lang, 'access_status')}: {str(result.get('status', 'pending')).replace('_', ' ')}",
+            f"{t(lang, 'access_activation')}: {activation}",
+            t(lang, "username_login_hint"),
+        ]
+    )

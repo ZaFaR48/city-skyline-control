@@ -10,10 +10,6 @@ class AddStation(StatesGroup):
     local_ip = State()
     rustdesk_id = State()
     gps = State()
-    camera_ip = State()
-    rtsp_url = State()
-    qr = State()
-    nfc = State()
     confirm = State()
 
 

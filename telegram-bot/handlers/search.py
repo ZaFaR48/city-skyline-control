@@ -63,10 +63,10 @@ async def search_query(message: Message, state: FSMContext) -> None:
         lines.append(
             "\n".join([
                 f"{station.get('station_code', '-')}: {station.get('name', '-')}",
-                f"District: {station.get('district') or '-'}",
-                f"Address: {station.get('address', '-')}",
-                f"VPN IP: {station.get('vpn_ip', '-')}",
-                f"Status: {station.get('status', '-')}",
+                f"{t(lang, 'label_district')}: {station.get('district') or '-'}",
+                f"{t(lang, 'label_address')}: {station.get('address', '-')}",
+                f"{t(lang, 'label_vpn')}: {station.get('vpn_ip', '-')}",
+                f"{t(lang, 'access_status')}: {station.get('status', '-')}",
             ])
         )
         lines.append("")

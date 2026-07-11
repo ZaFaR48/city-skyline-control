@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
-from urllib.parse import urlsplit, urlunsplit
+import re
 
 
 def clean_text(value: str | None) -> str:
@@ -9,7 +9,19 @@ def clean_text(value: str | None) -> str:
 
 
 def is_skip(value: str | None) -> bool:
-    return clean_text(value).casefold() == "⏭ skip".casefold()
+    return clean_text(value).casefold() in {
+        "⏭ skip".casefold(),
+        "⏭ пропустить".casefold(),
+        "⏭ гузариш".casefold(),
+    }
+
+
+def normalize_station_code(value: str | None) -> str:
+    return clean_text(value).upper()
+
+
+def is_valid_station_code(value: str) -> bool:
+    return bool(re.fullmatch(r"[A-Z0-9_-]{1,32}", value))
 
 
 def is_valid_ip(value: str) -> bool:
@@ -18,21 +30,3 @@ def is_valid_ip(value: str) -> bool:
     except ValueError:
         return False
     return True
-
-
-def mask_url_credentials(value: str | None) -> str:
-    url = clean_text(value)
-    if not url:
-        return "-"
-    try:
-        parts = urlsplit(url)
-    except ValueError:
-        return url
-    if not parts.username and not parts.password:
-        return url
-
-    host = parts.hostname or ""
-    if parts.port:
-        host = f"{host}:{parts.port}"
-    masked_netloc = f"***:***@{host}" if host else "***:***"
-    return urlunsplit((parts.scheme, masked_netloc, parts.path, parts.query, parts.fragment))

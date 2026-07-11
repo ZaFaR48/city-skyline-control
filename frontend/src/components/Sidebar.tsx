@@ -16,26 +16,28 @@ import {
 } from "lucide-react";
 import { getStoredUser } from "@/lib/auth";
 import type { User } from "@/lib/types";
+import { useI18n } from "@/lib/i18n";
 
-type NavItem = { to: string; label: string; icon: typeof LayoutDashboard; exact?: boolean };
+type NavItem = { to: string; key: string; icon: typeof LayoutDashboard; exact?: boolean };
 const NAV: NavItem[] = [
-  { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
-  { to: "/stations", label: "Stations", icon: Server },
-  { to: "/cameras", label: "Cameras", icon: Video },
-  { to: "/map", label: "Map", icon: MapIcon },
-  { to: "/alerts", label: "Alerts", icon: BellRing },
-  { to: "/analytics", label: "Reports", icon: BarChart3 },
-  { to: "/rustdesk", label: "RustDesk", icon: Monitor },
-  { to: "/headscale", label: "Headscale", icon: Network },
-  { to: "/onboarding", label: "Onboarding", icon: ClipboardCheck },
-  { to: "/telegram", label: "Telegram", icon: Send },
-  { to: "/n8n", label: "n8n", icon: Workflow },
-  { to: "/settings", label: "Settings", icon: SettingsIcon },
+  { to: "/", key: "nav.dashboard", icon: LayoutDashboard, exact: true },
+  { to: "/stations", key: "nav.stations", icon: Server },
+  { to: "/cameras", key: "nav.cameras", icon: Video },
+  { to: "/map", key: "nav.map", icon: MapIcon },
+  { to: "/alerts", key: "nav.alerts", icon: BellRing },
+  { to: "/analytics", key: "nav.reports", icon: BarChart3 },
+  { to: "/rustdesk", key: "nav.rustdesk", icon: Monitor },
+  { to: "/headscale", key: "nav.headscale", icon: Network },
+  { to: "/onboarding", key: "nav.onboarding", icon: ClipboardCheck },
+  { to: "/telegram", key: "nav.telegram", icon: Send },
+  { to: "/n8n", key: "nav.n8n", icon: Workflow },
+  { to: "/settings", key: "nav.settings", icon: SettingsIcon },
 ];
 
 export function Sidebar() {
   const path = useRouterState({ select: (s) => s.location.pathname });
   const user = getStoredUser<User>();
+  const { t } = useI18n();
   return (
     <aside className="hidden md:flex w-60 shrink-0 flex-col border-r border-border bg-panel/60 backdrop-blur-xl">
       <div className="h-16 flex items-center gap-2 px-5 border-b border-border">
@@ -64,7 +66,7 @@ export function Sidebar() {
               }`}
             >
               <Icon className={`size-4 ${active ? "text-primary" : ""}`} />
-              <span>{item.label}</span>
+              <span>{t(item.key)}</span>
               {active && <span className="ml-auto size-1.5 rounded-full bg-primary" />}
             </Link>
           );

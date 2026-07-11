@@ -8,15 +8,14 @@ from aiogram.types import Message
 from api import BackendAPIError, api
 from i18n import all_menu_labels, all_texts, t
 from keyboards import (
+    approved_update_keyboard,
     confirm_keyboard,
     location_keyboard,
     main_keyboard,
-    nfc_keyboard,
-    qr_keyboard,
     skip_keyboard,
 )
 from states import AddStation
-from validators import clean_text, is_skip, is_valid_ip, mask_url_credentials
+from validators import clean_text, is_skip, is_valid_ip, is_valid_station_code, normalize_station_code
 
 
 router = Router()
@@ -50,11 +49,24 @@ async def station_start(message: Message, state: FSMContext) -> None:
 @router.message(AddStation.code)
 async def station_code(message: Message, state: FSMContext) -> None:
     lang = await _lang(state)
-    value = clean_text(message.text)
-    if not value or is_skip(value):
-        await message.answer(t(lang, "invalid_required"))
+    value = normalize_station_code(message.text)
+    if not value or is_skip(value) or not is_valid_station_code(value):
+        await message.answer(t(lang, "invalid_station_code"))
         return
-    await state.update_data(code=value)
+    try:
+        existing = await api.station_by_code(value)
+    except BackendAPIError as exc:
+        await message.answer(f"{t(lang, 'api_error')} {exc.message}")
+        return
+    await state.update_data(
+        code=value,
+        existing_station_id=existing.get("id") if existing else None,
+        existing_station=existing,
+        existing_approved=bool(existing and existing.get("approved_at")),
+    )
+    if existing:
+        key = "station_exists_approved" if existing.get("approved_at") else "station_exists_pending"
+        await message.answer(f"{t(lang, key).format(code=value)}\n\n{_existing_station_text(lang, existing)}")
     await state.set_state(AddStation.name)
     await message.answer(t(lang, "enter_name"))
 
@@ -78,11 +90,11 @@ async def station_region(message: Message, state: FSMContext) -> None:
     if not value or is_skip(value):
         await message.answer(t(lang, "invalid_required"))
         return
-    allowed = {"ismoili somoni", "shohmansur", "sino", "firdavsi"}
-    if value.casefold() not in allowed:
-        await message.answer("Enter one Dushanbe district: Ismoili Somoni, Shohmansur, Sino, or Firdavsi.")
+    canonical = _canonical_district(value)
+    if canonical is None:
+        await message.answer(t(lang, "district_error"))
         return
-    await state.update_data(region=value)
+    await state.update_data(region=canonical)
     await state.set_state(AddStation.address)
     await message.answer(t(lang, "enter_address"))
 
@@ -148,79 +160,52 @@ async def station_gps(message: Message, state: FSMContext) -> None:
     else:
         await message.answer(t(lang, "invalid_location"), reply_markup=location_keyboard(lang))
         return
-    await state.set_state(AddStation.camera_ip)
-    await message.answer(t(lang, "enter_camera_ip"), reply_markup=skip_keyboard(lang))
-
-
-@router.message(AddStation.camera_ip)
-async def station_camera_ip(message: Message, state: FSMContext) -> None:
-    lang = await _lang(state)
-    value = clean_text(message.text)
-    if is_skip(value):
-        await state.update_data(camera_ip=None)
-    else:
-        if not is_valid_ip(value):
-            await message.answer(t(lang, "invalid_ip"), reply_markup=skip_keyboard(lang))
-            return
-        await state.update_data(camera_ip=value)
-    await state.set_state(AddStation.rtsp_url)
-    await message.answer(t(lang, "enter_rtsp"), reply_markup=skip_keyboard(lang))
-
-
-@router.message(AddStation.rtsp_url)
-async def station_rtsp_url(message: Message, state: FSMContext) -> None:
-    lang = await _lang(state)
-    value = clean_text(message.text)
-    await state.update_data(rtsp_url=None if is_skip(value) else value)
-    await state.set_state(AddStation.qr)
-    await message.answer(t(lang, "enter_qr"), reply_markup=qr_keyboard(lang))
-
-
-@router.message(AddStation.qr)
-async def station_qr(message: Message, state: FSMContext) -> None:
-    lang = await _lang(state)
-    value = clean_text(message.text)
-    await state.update_data(qr_requested=value == t(lang, "generate_qr"))
-    await state.set_state(AddStation.nfc)
-    await message.answer(t(lang, "enter_nfc"), reply_markup=nfc_keyboard(lang))
-
-
-@router.message(AddStation.nfc)
-async def station_nfc(message: Message, state: FSMContext) -> None:
-    lang = await _lang(state)
-    value = clean_text(message.text)
-    await state.update_data(nfc_requested=value == t(lang, "assign_nfc"))
     await state.set_state(AddStation.confirm)
     data = await state.get_data()
-    await message.answer(_summary(lang, data), reply_markup=confirm_keyboard(lang))
+    keyboard = approved_update_keyboard(lang) if data.get("existing_approved") else confirm_keyboard(lang)
+    await message.answer(_summary(lang, data), reply_markup=keyboard)
 
 
 @router.message(AddStation.confirm)
 async def station_confirm(message: Message, state: FSMContext) -> None:
     lang = await _lang(state)
-    if clean_text(message.text) not in all_texts("save"):
-        data = await state.get_data()
-        await message.answer(_summary(lang, data), reply_markup=confirm_keyboard(lang))
-        return
-
     data = await state.get_data()
+    try:
+        current = await api.station_by_code(str(data.get("code", "")))
+    except BackendAPIError as exc:
+        await message.answer(f"{t(lang, 'api_error')} {exc.message}")
+        return
+    if current and current.get("approved_at") and not data.get("existing_approved"):
+        await state.update_data(existing_station_id=current.get("id"), existing_station=current, existing_approved=True)
+        data = await state.get_data()
+        await message.answer(
+            f"{t(lang, 'station_exists_approved').format(code=data['code'])}\n\n{_summary(lang, data)}",
+            reply_markup=approved_update_keyboard(lang),
+        )
+        return
+    required = t(lang, "confirm_approved_update") if data.get("existing_approved") else None
+    accepted = clean_text(message.text) == required if required else clean_text(message.text) in all_texts("save")
+    keyboard = approved_update_keyboard(lang) if data.get("existing_approved") else confirm_keyboard(lang)
+    if not accepted:
+        await message.answer(_summary(lang, data), reply_markup=keyboard)
+        return
     missing = _missing_backend_fields(data)
     if missing:
         await message.answer(
             f"{t(lang, 'missing_backend')}\n\n{t(lang, 'missing_fields')} {', '.join(missing)}",
-            reply_markup=confirm_keyboard(lang),
+            reply_markup=keyboard,
         )
         return
 
     try:
         regions = await api.regions()
     except BackendAPIError as exc:
-        await message.answer(f"{t(lang, 'api_error')} {exc.message}", reply_markup=confirm_keyboard(lang))
+        await message.answer(f"{t(lang, 'api_error')} {exc.message}", reply_markup=keyboard)
         return
     city = next((region for region in regions if region.get("code") == "dushanbe"), None)
     district = next((region for region in regions if str(region.get("name", "")).casefold() == str(data["region"]).casefold()), None)
     if not city or not district:
-        await message.answer("Canonical Dushanbe region data is unavailable.", reply_markup=confirm_keyboard(lang))
+        await message.answer(t(lang, "district_error"), reply_markup=keyboard)
         return
 
     station_payload = {
@@ -237,42 +222,20 @@ async def station_confirm(message: Message, state: FSMContext) -> None:
     }
 
     try:
-        created = await api.create_station(station_payload)
+        saved, outcome = await _save_station(station_payload, allow_approved=bool(data.get("existing_approved")))
     except BackendAPIError as exc:
-        await message.answer(f"{t(lang, 'api_error')} {exc.message}", reply_markup=confirm_keyboard(lang))
+        await message.answer(f"{t(lang, 'api_error')} {exc.message}", reply_markup=keyboard)
         return
-
-    followups = []
-    station_id = created.get("id")
-    camera_ip = data.get("camera_ip")
-    rtsp_url = data.get("rtsp_url")
-    if station_id and camera_ip and rtsp_url:
-        try:
-            await api.create_camera({
-                "station_id": station_id,
-                "name": f"{data['code']} Camera",
-                "ip": camera_ip,
-                "rtsp_url": rtsp_url,
-                "ptz": False,
-                "resolution": "1920x1080",
-                "fps": 25,
-            })
-            followups.append(t(lang, "station_created_camera"))
-        except BackendAPIError as exc:
-            followups.append(f"{t(lang, 'api_error')} camera: {exc.message}")
-    else:
-        followups.append(t(lang, "station_created_no_camera"))
-
+    station_id = saved.get("id")
     rustdesk_id = data.get("rustdesk_id")
     if station_id and rustdesk_id:
         try:
             await api.update_rustdesk(station_id, rustdesk_id)
         except BackendAPIError as exc:
-            followups.append(f"{t(lang, 'api_error')} RustDesk: {exc.message}")
+            await message.answer(f"{t(lang, 'api_error')} RustDesk: {exc.message}")
 
     await _clear_keep_lang(state, lang)
-    details = "\n".join(followups)
-    await message.answer(f"{t(lang, 'saved')}\n{details}", reply_markup=main_keyboard(lang))
+    await message.answer(t(lang, outcome), reply_markup=main_keyboard(lang))
 
 
 def _missing_backend_fields(data: dict) -> list[str]:
@@ -290,20 +253,76 @@ def _summary(lang: str, data: dict) -> str:
     rows = [
         t(lang, "summary_title"),
         "",
-        f"Code: {data.get('code', '-')}",
-        f"Name: {data.get('name', '-')}",
-        f"Region: {data.get('region', '-')}",
-        f"Address: {data.get('address', '-')}",
-        f"VPN IP: {data.get('vpn_ip') or '-'}",
-        f"Local IP: {data.get('local_ip') or '-'}",
-        f"RustDesk ID: {data.get('rustdesk_id') or '-'}",
-        f"GPS: {gps}",
-        f"Camera IP: {data.get('camera_ip') or '-'}",
-        f"RTSP URL: {mask_url_credentials(data.get('rtsp_url'))}",
-        f"QR: {'requested' if data.get('qr_requested') else 'skipped'}",
-        f"NFC: {'requested' if data.get('nfc_requested') else 'skipped'}",
+        f"{t(lang, 'label_code')}: {data.get('code', '-')}",
+        f"{t(lang, 'label_name')}: {data.get('name', '-')}",
+        f"{t(lang, 'label_district')}: {_localized_district(lang, data.get('region'))}",
+        f"{t(lang, 'label_address')}: {data.get('address', '-')}",
+        f"{t(lang, 'label_vpn')}: {data.get('vpn_ip') or '-'}",
+        f"{t(lang, 'label_local')}: {data.get('local_ip') or '-'}",
+        f"{t(lang, 'label_rustdesk')}: {data.get('rustdesk_id') or '-'}",
+        f"{t(lang, 'label_gps')}: {gps}",
+        f"{t(lang, 'label_record_status')}: {t(lang, 'record_existing') if data.get('existing_station_id') else t(lang, 'record_new')}",
+        f"{t(lang, 'label_approval')}: {t(lang, 'approval_approved') if data.get('existing_approved') else t(lang, 'approval_pending')}",
     ]
     missing = _missing_backend_fields(data)
     if missing:
         rows.extend(["", t(lang, "missing_backend"), f"{t(lang, 'missing_fields')} {', '.join(missing)}"])
     return "\n".join(rows)
+
+
+async def _save_station(payload: dict, *, allow_approved: bool = False) -> tuple[dict, str]:
+    existing = await api.station_by_code(str(payload["station_code"]))
+    if existing:
+        if existing.get("approved_at") and not allow_approved:
+            raise BackendAPIError("Approved station update requires explicit confirmation", 409)
+        update_payload = {key: value for key, value in payload.items() if key != "station_code"}
+        saved = await api.update_station(int(existing["id"]), update_payload)
+        outcome = "saved_approved" if existing.get("approved_at") else "saved_existing_pending"
+        return saved, outcome
+    try:
+        created = await api.create_station(payload)
+        return created, "saved_new_pending"
+    except BackendAPIError as exc:
+        if exc.status_code != 409:
+            raise
+        existing = await api.station_by_code(str(payload["station_code"]))
+        if not existing:
+            raise BackendAPIError("Station inventory changed; try again", 409) from exc
+        if existing.get("approved_at") and not allow_approved:
+            raise BackendAPIError("Approved station update requires explicit confirmation", 409) from exc
+        update_payload = {key: value for key, value in payload.items() if key != "station_code"}
+        saved = await api.update_station(int(existing["id"]), update_payload)
+        outcome = "saved_approved" if existing.get("approved_at") else "saved_existing_pending"
+        return saved, outcome
+
+
+def _canonical_district(value: str) -> str | None:
+    aliases = {
+        "ismoili somoni": "Ismoili Somoni", "исмоили сомони": "Ismoili Somoni", "исмоили сомонӣ": "Ismoili Somoni",
+        "shohmansur": "Shohmansur", "шохмансур": "Shohmansur", "шоҳмансур": "Shohmansur",
+        "sino": "Sino", "сино": "Sino",
+        "firdavsi": "Firdavsi", "фирдавси": "Firdavsi", "фирдавсӣ": "Firdavsi",
+    }
+    return aliases.get(value.strip().casefold())
+
+
+def _existing_station_text(lang: str, station: dict) -> str:
+    rows = [
+        f"{t(lang, 'label_name')}: {station.get('name') or '-'}",
+        f"{t(lang, 'label_district')}: {_localized_district(lang, station.get('district'))}",
+        f"{t(lang, 'label_address')}: {station.get('address') or '-'}",
+        f"{t(lang, 'label_vpn')}: {station.get('vpn_ip') or '-'}",
+        f"{t(lang, 'label_local')}: {station.get('local_ip') or '-'}",
+        f"{t(lang, 'label_rustdesk')}: {station.get('rustdesk_id') or '-'}",
+        f"{t(lang, 'label_approval')}: {t(lang, 'approval_approved') if station.get('approved_at') else t(lang, 'approval_pending')}",
+    ]
+    return "\n".join(rows)
+
+
+def _localized_district(lang: str, value: str | None) -> str:
+    canonical = _canonical_district(value or "") or value or "-"
+    labels = {
+        "ru": {"Ismoili Somoni": "Исмоили Сомони", "Shohmansur": "Шохмансур", "Sino": "Сино", "Firdavsi": "Фирдавси"},
+        "tj": {"Ismoili Somoni": "Исмоили Сомонӣ", "Shohmansur": "Шоҳмансур", "Sino": "Сино", "Firdavsi": "Фирдавсӣ"},
+    }
+    return labels.get(lang, {}).get(canonical, canonical)

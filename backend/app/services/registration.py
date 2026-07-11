@@ -73,6 +73,19 @@ async def create_activation(
     return user, code, expires_at
 
 
+def create_user_reset_token(db: AsyncSession, user: User) -> tuple[str, datetime]:
+    code = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=settings.ACTIVATION_TOKEN_TTL_MINUTES)
+    db.add(
+        UserActivationToken(
+            user_id=user.id,
+            token_hash=hash_activation_code(code),
+            expires_at=expires_at,
+        )
+    )
+    return code, expires_at
+
+
 async def _unique_username(db: AsyncSession, registration: UserRegistrationRequest) -> str:
     raw = (registration.telegram_username or f"telegram_{registration.telegram_user_id}").lower()
     base = "".join(char for char in raw if char.isalnum() or char in "_-")[:48] or f"telegram_{registration.telegram_user_id}"

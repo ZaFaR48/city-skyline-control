@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { ShieldCheck, Loader2, AlertOctagon } from "lucide-react";
 import { login } from "@/lib/api";
 import { isAuthenticated } from "@/lib/auth";
+import { useI18n } from "@/lib/i18n";
 
 export const Route = createFileRoute("/login")({
   head: () => ({
@@ -16,6 +17,7 @@ export const Route = createFileRoute("/login")({
 
 function LoginPage() {
   const navigate = useNavigate();
+  const { language, setLanguage, t } = useI18n();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -32,8 +34,8 @@ function LoginPage() {
     try {
       await login(username.trim(), password);
       navigate({ to: "/" });
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Sign-in failed");
+    } catch {
+      setError(t("login.invalid"));
     } finally {
       setLoading(false);
     }
@@ -50,6 +52,18 @@ function LoginPage() {
         }}
       />
       <form onSubmit={onSubmit} className="glass w-full max-w-sm rounded-2xl p-8 space-y-6">
+        <div className="flex justify-end">
+          <select
+            aria-label="Language"
+            value={language}
+            onChange={(event) => setLanguage(event.target.value as "ru" | "tj" | "en")}
+            className="h-8 rounded bg-input border border-border px-2 text-xs"
+          >
+            <option value="ru">RU</option>
+            <option value="tj">TJ</option>
+            <option value="en">EN</option>
+          </select>
+        </div>
         <div className="flex items-center gap-3">
           <div className="size-11 rounded-md grid place-items-center bg-gradient-to-br from-info to-primary shadow-lg shadow-primary/30">
             <ShieldCheck className="size-6 text-primary-foreground" />
@@ -63,14 +77,14 @@ function LoginPage() {
         </div>
 
         <div className="space-y-1">
-          <h1 className="text-xl font-semibold">Sign in</h1>
-          <p className="text-xs text-muted-foreground">Operator access to the NOC dashboard.</p>
+          <h1 className="text-xl font-semibold">{t("login.title")}</h1>
+          <p className="text-xs text-muted-foreground">{t("login.subtitle")}</p>
         </div>
 
         <div className="space-y-3">
           <label className="block">
             <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
-              Username
+              {t("login.username")}
             </span>
             <input
               type="text"
@@ -81,10 +95,13 @@ function LoginPage() {
               onChange={(e) => setUsername(e.target.value)}
               className="mt-1 w-full h-10 px-3 rounded-md bg-input/60 border border-border text-sm focus:outline-none focus:ring-2 focus:ring-ring/50"
             />
+            <span className="block mt-1 text-[11px] text-muted-foreground normal-case tracking-normal">
+              {t("login.usernameHelp")}
+            </span>
           </label>
           <label className="block">
             <span className="text-[11px] uppercase tracking-wider text-muted-foreground">
-              Password
+              {t("login.password")}
             </span>
             <input
               type="password"
@@ -110,7 +127,7 @@ function LoginPage() {
           className="w-full h-10 inline-flex items-center justify-center gap-2 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-60"
         >
           {loading && <Loader2 className="size-4 animate-spin" />}
-          {loading ? "Signing in…" : "Sign in"}
+          {loading ? t("login.loading") : t("login.submit")}
         </button>
 
         <p className="text-[11px] text-muted-foreground text-center">

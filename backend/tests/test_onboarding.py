@@ -14,6 +14,7 @@ from app.routers.onboarding import (
     _parse_district_csv,
     duplicate_alert_report,
     duplicate_vpn_report,
+    station_by_exact_code,
 )
 from app.schemas import DistrictAssignmentIn
 
@@ -69,6 +70,14 @@ async def test_csv_dry_run_parses_and_does_not_assign(db):
     assert preview.preview_token
     await db.refresh(station)
     assert station.district_id is None
+
+
+@pytest.mark.asyncio
+async def test_exact_code_lookup_includes_pending_station(db):
+    station = await create_station(db, "92020")
+    rendered = await station_by_exact_code(" 92020 ", db, None)
+    assert rendered.id == station.id
+    assert rendered.approved_at is None
 
 
 @pytest.mark.asyncio

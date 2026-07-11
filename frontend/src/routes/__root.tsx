@@ -14,6 +14,7 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { Sidebar } from "@/components/Sidebar";
 import { isAuthenticated } from "@/lib/auth";
+import { I18nProvider } from "@/lib/i18n";
 
 function NotFoundComponent() {
   return (
@@ -101,7 +102,7 @@ export const Route = createRootRouteWithContext<{
 
 function RootShell({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="ru" className="dark">
       <head>
         <HeadContent />
       </head>
@@ -130,14 +131,16 @@ function RootComponent() {
   }, [navigate, isPublicPage]);
 
   return (
-    <QueryClientProvider client={queryClient}>
-      <div className="flex h-screen w-full overflow-hidden">
-        {!isPublicPage && <Sidebar />}
+    <I18nProvider>
+      <QueryClientProvider client={queryClient}>
+        <div className="flex h-screen w-full overflow-hidden">
+          {!isPublicPage && <Sidebar />}
 
-        <div className="flex-1 flex flex-col min-w-0">
-          <Outlet />
+          <div className="flex-1 flex flex-col min-w-0">
+            <Outlet />
+          </div>
         </div>
-      </div>
-    </QueryClientProvider>
+      </QueryClientProvider>
+    </I18nProvider>
   );
 }

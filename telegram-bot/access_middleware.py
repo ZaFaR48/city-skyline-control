@@ -6,9 +6,10 @@ from aiogram import BaseMiddleware
 from aiogram.types import Message, TelegramObject
 
 from api import BackendAPIError, api
+from i18n import all_texts
 
 
-PUBLIC_TEXT = {"My status", "Request access", "Help"}
+PUBLIC_TEXT = all_texts("my_access") | all_texts("request_access") | all_texts("help_access")
 
 
 class AccessMiddleware(BaseMiddleware):
@@ -21,7 +22,7 @@ class AccessMiddleware(BaseMiddleware):
         if not isinstance(event, Message) or event.from_user is None:
             return await handler(event, data)
         text = (event.text or "").strip()
-        if text.startswith(("/start", "/status", "/help")) or text in PUBLIC_TEXT:
+        if text.startswith(("/start", "/status", "/access", "/help")) or text in PUBLIC_TEXT:
             return await handler(event, data)
         try:
             registration = await api.registration_start(event.from_user)

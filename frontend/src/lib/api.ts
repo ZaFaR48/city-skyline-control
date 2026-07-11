@@ -1,4 +1,5 @@
 import { clearAuth, getToken, setStoredUser, setToken } from "./auth";
+import { apiErrorMessage, currentLanguage } from "./i18n";
 import type {
   AlertItem,
   ActionPreview,
@@ -11,6 +12,7 @@ import type {
   HeadscaleApprovalPreview,
   HeadscaleNode,
   Region,
+  PasswordResetPreview,
   RegistrationRequest,
   Role,
   Station,
@@ -74,7 +76,10 @@ export async function apiFetch<T>(
     } catch {
       // Non-JSON error response.
     }
-    throw new ApiError(message, response.status);
+    throw new ApiError(
+      apiErrorMessage(currentLanguage(), response.status, message),
+      response.status,
+    );
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
@@ -168,8 +173,24 @@ export const linkRegistrationToExistingUser = (
       }),
     },
   );
+export const previewTelegramPasswordReset = (registrationId: number) =>
+  apiFetch<PasswordResetPreview>(`/api/registrations/${registrationId}/password-reset-preview`, {
+    method: "POST",
+  });
+export const initiateTelegramPasswordReset = (
+  registrationId: number,
+  previewToken: string,
+  confirmation: string,
+) =>
+  apiFetch<{ status: string; username: string; notification_sent: boolean }>(
+    `/api/registrations/${registrationId}/password-reset`,
+    {
+      method: "POST",
+      body: JSON.stringify({ preview_token: previewToken, confirmation }),
+    },
+  );
 export const activateAccount = (code: string, password: string) =>
-  apiFetch<{ status: string; username: string }>(
+  apiFetch<{ status: "activated"; username: string; role: Role; is_active: boolean }>(
     "/api/registrations/activate",
     { method: "POST", body: JSON.stringify({ code, password }) },
     false,

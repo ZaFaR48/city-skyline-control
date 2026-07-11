@@ -18,7 +18,7 @@ def test_admin_keyboard_exposes_pending_users_only_for_admins():
     viewer_text = [button.text for row in main_keyboard("en", is_admin=False).keyboard for button in row]
     assert "Pending users" in admin_text
     assert "Pending users" not in viewer_text
-    assert {"My status", "Request access", "Help"}.issubset(admin_text)
+    assert {"My access", "Request access", "Help"}.issubset(admin_text)
 
 
 def test_registration_callbacks_are_narrow_and_role_explicit():

@@ -76,6 +76,33 @@ async def station_approval_inventory(
     return await serialize_stations(db, list(stations))
 
 
+@router.get("/stations/by-code/{station_code}", response_model=StationOut)
+async def station_by_exact_code(
+    station_code: str,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(Role.admin, Role.operator)),
+):
+    normalized = station_code.strip().upper()
+    if not normalized:
+        raise HTTPException(422, "Station code is required")
+    station = (
+        await db.execute(
+            select(Station)
+            .join(OperationalRegion, Station.city_id == OperationalRegion.id)
+            .where(
+                func.upper(Station.station_code) == normalized,
+                OperationalRegion.code == "dushanbe",
+                Station.is_active.is_(True),
+                Station.is_archived.is_(False),
+            )
+            .options(selectinload(Station.city), selectinload(Station.district))
+        )
+    ).scalar_one_or_none()
+    if not station:
+        raise HTTPException(404, "Station not found")
+    return (await serialize_stations(db, [station]))[0]
+
+
 @router.post("/stations/{station_id}/approval-preview", response_model=StationApprovalPreviewOut)
 async def preview_station_approval(
     station_id: int,

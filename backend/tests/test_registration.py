@@ -9,11 +9,16 @@ from sqlalchemy import func, select
 from app.models import AuditLog, RegistrationStatus, TelegramIdentity, User, UserActivationToken, UserRegistrationRequest
 from app.routers.registrations import (
     activate_account,
+    initiate_password_reset,
     link_registration_to_existing_user,
+    preview_password_reset,
     preview_existing_user_link,
     telegram_start,
 )
-from app.schemas import ActivationIn, RegistrationUpsertIn, TelegramLinkApplyIn, TelegramLinkPreviewIn
+from app.schemas import ActivationIn, PasswordResetApplyIn, RegistrationUpsertIn, TelegramLinkApplyIn, TelegramLinkPreviewIn
+from app.routers.auth import login
+from app.schemas import LoginIn
+from app.security import hash_password
 from app.services.registration import create_activation
 from starlette.requests import Request
 
@@ -50,7 +55,10 @@ async def test_activation_token_expires_and_is_single_use(db):
     user, code, _ = await create_activation(db, row)
     await db.commit()
     result = await activate_account(ActivationIn(code=code, password="A-secure-password-123"), db)
-    assert result["status"] == "activated"
+    assert result.status == "activated"
+    assert result.username == user.username
+    assert result.role == "operator"
+    assert result.is_active is True
     with pytest.raises(HTTPException):
         await activate_account(ActivationIn(code=code, password="A-secure-password-123"), db)
 
@@ -134,6 +142,48 @@ async def test_telegram_id_cannot_be_linked_to_a_second_user(db):
     preview = await preview_existing_user_link(registration.id, TelegramLinkPreviewIn(user_id=target.id), db, actor)
     assert not preview.valid
     assert "Telegram ID is already linked" in " ".join(preview.errors)
+
+
+@pytest.mark.asyncio
+async def test_login_still_requires_exact_username_and_valid_password(db):
+    user = User(
+        username="telegram-exact-user",
+        email="telegram-login@test.invalid",
+        hashed_password=hash_password("Correct-password-123"),
+        role="operator",
+        is_active=True,
+    )
+    db.add(user)
+    await db.flush()
+    tokens = await login(LoginIn(username=user.username, password="Correct-password-123"), db)
+    assert tokens.access_token
+    with pytest.raises(HTTPException):
+        await login(LoginIn(username="admin", password="Correct-password-123"), db)
+
+
+@pytest.mark.asyncio
+async def test_admin_password_reset_creates_single_use_token_without_changing_password(db, monkeypatch):
+    actor = User(username="reset-admin", email="reset-admin@test.invalid", hashed_password="x", role="admin", is_active=True)
+    target = User(username="reset-target", email="reset-target@test.invalid", hashed_password="original-hash", role="viewer", is_active=True)
+    registration = UserRegistrationRequest(telegram_user_id=700020, status="activated")
+    db.add_all([actor, target, registration])
+    await db.flush()
+    registration.user_id = target.id
+    db.add(TelegramIdentity(user_id=target.id, telegram_user_id=registration.telegram_user_id))
+    await db.flush()
+    monkeypatch.setattr("app.routers.registrations.send_telegram_to", lambda *args, **kwargs: _true())
+    preview = await preview_password_reset(registration.id, db, actor)
+    result = await initiate_password_reset(
+        registration.id,
+        PasswordResetApplyIn(preview_token=preview.preview_token or "", confirmation=preview.confirmation_phrase),
+        request(),
+        db,
+        actor,
+    )
+    await db.refresh(target)
+    assert result["status"] == "sent"
+    assert target.hashed_password == "original-hash"
+    assert await db.scalar(select(func.count()).select_from(UserActivationToken).where(UserActivationToken.user_id == target.id)) == 1
 
 
 async def _true() -> bool:

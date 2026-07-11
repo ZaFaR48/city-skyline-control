@@ -84,6 +84,22 @@ class BackendAPI:
         data = await self._request("POST", "/api/stations", json=payload)
         return dict(data or {})
 
+    async def station_by_code(self, station_code: str) -> dict[str, Any] | None:
+        try:
+            data = await self._request(
+                "GET",
+                f"/api/onboarding/stations/by-code/{station_code}",
+            )
+        except BackendAPIError as exc:
+            if exc.status_code == 404:
+                return None
+            raise
+        return dict(data or {})
+
+    async def update_station(self, station_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        data = await self._request("PATCH", f"/api/stations/{station_id}", json=payload)
+        return dict(data or {})
+
     async def create_camera(self, payload: dict[str, Any]) -> dict[str, Any]:
         data = await self._request("POST", "/api/cameras", json=payload)
         return dict(data or {})
