@@ -19,7 +19,7 @@ async def login(payload: LoginIn, db: AsyncSession = Depends(get_db)):
     if not user.is_active:
         raise HTTPException(status_code=403, detail="Account disabled")
     return TokenOut(
-        access_token=create_access_token(user.username, user.role.value),
+        access_token=create_access_token(user.username, user.role),
         refresh_token=create_refresh_token(user.username),
     )
 
@@ -34,10 +34,10 @@ async def refresh(token: str, db: AsyncSession = Depends(get_db)):
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid refresh token")
     user = (await db.execute(select(User).where(User.username == username))).scalar_one_or_none()
-    if not user:
+    if not user or not user.is_active:
         raise HTTPException(status_code=401, detail="User not found")
     return TokenOut(
-        access_token=create_access_token(user.username, user.role.value),
+        access_token=create_access_token(user.username, user.role),
         refresh_token=create_refresh_token(user.username),
     )
 

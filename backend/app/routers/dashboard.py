@@ -11,7 +11,9 @@ from ..services.dashboard import build_dashboard_summary
 router = APIRouter()
 
 
-@router.get("/summary", response_model=DashboardSummaryOut, deprecated=True)
-async def summary(db: AsyncSession = Depends(get_db), _: User = Depends(get_current_user)):
-    """Compatibility alias. New clients use /api/dashboard/summary."""
+@router.get("/summary", response_model=DashboardSummaryOut)
+async def summary(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(get_current_user),
+):
     return await build_dashboard_summary(db)

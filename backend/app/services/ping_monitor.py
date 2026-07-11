@@ -1,10 +1,5 @@
-"""Async ping monitor.
+"""Persistent connectivity monitoring for active stations."""
 
-Every PING_INTERVAL_SEC the scheduler invokes ping_all_stations(), which
-pings each station's VPN IP, persists a ping_history row, updates the
-station's status/latency and raises Telegram + n8n alerts after
-PING_FAIL_THRESHOLD consecutive failures.
-"""
 from __future__ import annotations
 
 import asyncio
@@ -15,57 +10,82 @@ from sqlalchemy import select
 
 from ..config import settings
 from ..database import SessionLocal
-from ..models import Alert, AlertSeverity, AlertType, PingHistory, Station, StationStatus
+from ..models import PingHistory, Station, StationStatus
 from .n8n import forward_event
+from .station_status import StationStatusResolver
 from .telegram import send_telegram
 
-_consecutive_failures: dict[int, int] = {}
 
-
-async def _ping_one(station: Station) -> tuple[float, float, bool]:
+async def _ping_one(station: Station) -> tuple[float | None, float | None, bool, str | None]:
+    if not station.vpn_ip:
+        return None, None, False, "not_configured"
     try:
-        host = await async_ping(station.vpn_ip, count=3, timeout=settings.PING_TIMEOUT_SEC,
-                                privileged=True)
-        return host.avg_rtt, host.packet_loss * 100, host.is_alive
+        host = await async_ping(
+            station.vpn_ip,
+            count=3,
+            timeout=settings.PING_TIMEOUT_SEC,
+            privileged=True,
+        )
+        if not host.is_alive:
+            return None, host.packet_loss * 100, False, "unreachable"
+        return host.avg_rtt, host.packet_loss * 100, True, None
+    except PermissionError:
+        return None, None, False, "ping_permission_denied"
     except Exception:
-        return 0.0, 100.0, False
+        return None, None, False, "ping_error"
 
 
-def _status_from(latency: float, success: bool) -> StationStatus:
-    if not success: return StationStatus.offline
-    if latency > 150: return StationStatus.warning
-    return StationStatus.online
+async def ping_station(station_id: int) -> None:
+    async with SessionLocal() as db:
+        station = await db.get(Station, station_id)
+        if not station or not station.is_active or station.is_archived:
+            return
+        latency, loss, success, error_type = await _ping_one(station)
+        now = datetime.now(timezone.utc)
+        db.add(
+            PingHistory(
+                station_id=station.id,
+                latency_ms=latency,
+                packet_loss=loss,
+                success=success,
+                error_type=error_type,
+                checked_at=now,
+            )
+        )
+        resolution = await StationStatusResolver.resolve_ping(
+            db,
+            station,
+            success=success,
+            latency_ms=latency,
+            checked_at=now,
+            error_type=error_type,
+        )
+        await db.commit()
+        if resolution.transitioned and resolution.new_status == StationStatus.offline.value:
+            await _notify_offline(station, resolution.reason, now)
 
 
 async def ping_all_stations() -> None:
     async with SessionLocal() as db:
-        stations = (await db.execute(select(Station))).scalars().all()
-        results = await asyncio.gather(*(_ping_one(s) for s in stations))
+        ids = (
+            await db.execute(
+                select(Station.id).where(Station.is_active.is_(True), Station.is_archived.is_(False))
+            )
+        ).scalars().all()
+    await asyncio.gather(*(ping_station(station_id) for station_id in ids))
 
-        for s, (latency, loss, success) in zip(stations, results):
-            db.add(PingHistory(station_id=s.id, latency_ms=latency,
-                               packet_loss=loss, success=success))
-            new_status = _status_from(latency, success)
-            s.last_ping_ms = int(latency)
-            s.status = new_status
-            if success: s.last_seen = datetime.now(timezone.utc)
 
-            if not success:
-                _consecutive_failures[s.id] = _consecutive_failures.get(s.id, 0) + 1
-                if _consecutive_failures[s.id] == settings.PING_FAIL_THRESHOLD:
-                    db.add(Alert(
-                        station_id=s.id, type=AlertType.offline_station,
-                        severity=AlertSeverity.critical,
-                        message=f"Station {s.name} unreachable at {s.vpn_ip}",
-                    ))
-                    await send_telegram(
-                        f"🚨 Station Offline\nStation: {s.name}\nVPN: {s.vpn_ip}\n"
-                        f"Region: {s.region}\nTime: {datetime.utcnow():%H:%M:%S}"
-                    )
-                    await forward_event("station.offline", {
-                        "id": s.code, "name": s.name, "region": s.region, "vpn_ip": s.vpn_ip,
-                    })
-            else:
-                _consecutive_failures.pop(s.id, None)
-
-        await db.commit()
+async def _notify_offline(station: Station, reason: str, occurred_at: datetime) -> None:
+    await send_telegram(
+        f"🚨 Station Offline\nStation: {station.station_code} — {station.name}\n"
+        f"VPN: {station.vpn_ip or '—'}\nTime: {occurred_at.astimezone().isoformat(timespec='seconds')}"
+    )
+    await forward_event(
+        "station.offline",
+        {
+            "station_code": station.station_code,
+            "name": station.name,
+            "vpn_ip": station.vpn_ip,
+            "reason": reason,
+        },
+    )

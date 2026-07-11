@@ -17,6 +17,6 @@ async def history(station_id: int,
                   _: User = Depends(get_current_user)):
     stmt = (select(PingHistory)
             .where(PingHistory.station_id == station_id)
-            .order_by(PingHistory.created_at.desc())
+            .order_by(PingHistory.checked_at.desc())
             .limit(limit))
     return (await db.execute(stmt)).scalars().all()

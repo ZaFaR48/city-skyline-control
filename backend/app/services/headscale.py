@@ -1,18 +1,24 @@
-"""Headscale auto-discovery.
+"""Headscale inventory synchronization without automatic station creation/linking."""
 
-Polls the Headscale API and inserts any unknown nodes into headscale_nodes
-so they appear automatically in the dashboard.
-"""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 import httpx
 from sqlalchemy import select
 
 from ..config import settings
 from ..database import SessionLocal
-from ..models import HeadscaleNode, Station
+from ..models import ApprovalStatus, DeviceType, HeadscaleNode, Station
+
+
+def _parse_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 async def sync_headscale_nodes() -> int:
@@ -20,46 +26,61 @@ async def sync_headscale_nodes() -> int:
         return 0
     headers = {"Authorization": f"Bearer {settings.HEADSCALE_API_KEY}"}
     async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.get(f"{settings.HEADSCALE_URL}/api/v1/node", headers=headers)
-        if r.status_code != 200:
-            return 0
-        nodes = r.json().get("nodes", [])
+        response = await client.get(f"{settings.HEADSCALE_URL}/api/v1/node", headers=headers)
+        response.raise_for_status()
+        nodes = response.json().get("nodes", [])
 
     added = 0
     async with SessionLocal() as db:
-        for n in nodes:
-            key = n.get("nodeKey") or n.get("node_key") or n.get("id")
-            existing = (await db.execute(
-                select(HeadscaleNode).where(HeadscaleNode.node_key == str(key))
-            )).scalar_one_or_none()
+        for raw in nodes:
+            stable_id = raw.get("nodeKey") or raw.get("node_key") or raw.get("id")
+            if stable_id is None:
+                continue
+            key = str(stable_id)
+            node = (
+                await db.execute(select(HeadscaleNode).where(HeadscaleNode.node_key == key))
+            ).scalar_one_or_none()
+            addresses = raw.get("ipAddresses") or raw.get("ip_addresses") or []
+            vpn_ip = addresses[0] if addresses else None
+            hostname = raw.get("name") or raw.get("hostname") or raw.get("givenName") or "unknown"
+            given_name = raw.get("givenName") or raw.get("given_name")
+            last_seen = _parse_datetime(raw.get("lastSeen") or raw.get("last_seen"))
+            operating_system = raw.get("os") or raw.get("operatingSystem")
+            tags = raw.get("forcedTags") or raw.get("tags") or None
 
-            ip_list = n.get("ipAddresses") or n.get("ip_addresses") or []
-            vpn_ip = ip_list[0] if ip_list else ""
-            online = bool(n.get("online", False))
-            last_seen = n.get("lastSeen") or n.get("last_seen")
-            ls = datetime.fromisoformat(last_seen.replace("Z", "+00:00")) if last_seen else None
-
-            # Match station by VPN IP
-            station = None
-            if vpn_ip:
-                station = (await db.execute(
-                    select(Station).where(Station.vpn_ip == vpn_ip)
-                )).scalars().first()
-
-            if existing:
-                existing.online = online
-                existing.last_seen = ls or existing.last_seen
-                existing.vpn_ip = vpn_ip or existing.vpn_ip
-                if station and existing.station_id != station.id:
-                    existing.station_id = station.id
-            else:
-                db.add(HeadscaleNode(
-                    node_key=str(key),
-                    hostname=n.get("name") or n.get("givenName") or "unknown",
-                    vpn_ip=vpn_ip, online=online,
-                    last_seen=ls or datetime.now(timezone.utc),
-                    station_id=station.id if station else None,
-                ))
+            if node is None:
+                node = HeadscaleNode(
+                    node_key=key,
+                    hostname=hostname,
+                    given_name=given_name,
+                    vpn_ip=vpn_ip,
+                    online=bool(raw.get("online", False)),
+                    last_seen_at=last_seen,
+                    operating_system=operating_system,
+                    tags=tags,
+                    device_type=DeviceType.unknown.value,
+                    approval_status=ApprovalStatus.pending.value,
+                )
+                db.add(node)
                 added += 1
+            else:
+                node.hostname = hostname
+                node.given_name = given_name
+                node.vpn_ip = vpn_ip
+                node.online = bool(raw.get("online", False))
+                node.last_seen_at = last_seen or node.last_seen_at
+                node.operating_system = operating_system or node.operating_system
+                node.tags = tags
+
+            if (
+                node.station_id
+                and node.approval_status == ApprovalStatus.approved.value
+                and node.device_type == DeviceType.station.value
+                and vpn_ip
+            ):
+                station = await db.get(Station, node.station_id)
+                if station:
+                    station.vpn_ip = vpn_ip
+                    station.last_seen_at = last_seen or station.last_seen_at
         await db.commit()
     return added

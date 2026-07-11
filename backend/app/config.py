@@ -21,6 +21,13 @@ class Settings(BaseSettings):
     PING_INTERVAL_SEC: int = 30
     PING_TIMEOUT_SEC: int = 2
     PING_FAIL_THRESHOLD: int = 3
+    ONLINE_FRESHNESS_SECONDS: int = 90
+    DEGRADED_LATENCY_MS: int = 150
+    OFFLINE_AFTER_SECONDS: int = 120
+    TELEMETRY_FRESHNESS_SECONDS: int = 300
+
+    ACTIVATION_TOKEN_TTL_MINUTES: int = 15
+    PUBLIC_WEB_URL: str = "http://13.140.180.178:3002"
 
     CORS_ORIGINS: str = "http://localhost:5173"
 

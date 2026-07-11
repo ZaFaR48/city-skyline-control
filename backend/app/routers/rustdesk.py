@@ -16,7 +16,7 @@ async def list_devices(db: AsyncSession = Depends(get_db),
         select(RustdeskDevice, Station).join(Station, RustdeskDevice.station_id == Station.id)
     )).all()
     return [{
-        "station": s.name, "region": s.region, "vpn_ip": s.vpn_ip,
+        "station_code": s.station_code, "station": s.name, "district_id": s.district_id, "vpn_ip": s.vpn_ip,
         "rustdesk_id": d.rustdesk_id,
     } for d, s in rows]
 
