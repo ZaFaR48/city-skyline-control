@@ -44,7 +44,7 @@ async def sync_headscale_nodes() -> int:
             if vpn_ip:
                 station = (await db.execute(
                     select(Station).where(Station.vpn_ip == vpn_ip)
-                )).scalar_one_or_none()
+                )).scalars().first()
 
             if existing:
                 existing.online = online
