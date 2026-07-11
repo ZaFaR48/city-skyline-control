@@ -5,8 +5,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .routers import (
-    alerts, analytics, audit, auth, cameras, dashboard, headscale, ping, regions,
-    registrations, reports, rustdesk, stations, users, webhooks,
+    alerts, analytics, audit, auth, cameras, dashboard, headscale, onboarding, ping,
+    regions, registrations, reports, rustdesk, stations, users, webhooks,
 )
 from .scheduler import start_scheduler, stop_scheduler
 
@@ -49,6 +49,7 @@ app.include_router(reports.router,   prefix="/api/reports",    tags=["reports"])
 app.include_router(registrations.router, prefix="/api/registrations", tags=["registrations"])
 app.include_router(users.router,     prefix="/api/users",      tags=["users"])
 app.include_router(audit.router,     prefix="/api/audit",      tags=["audit"])
+app.include_router(onboarding.router, prefix="/api/onboarding", tags=["onboarding"])
 app.include_router(webhooks.router,  prefix="/api/webhooks",   tags=["webhooks"])
 
 

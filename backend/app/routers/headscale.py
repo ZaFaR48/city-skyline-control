@@ -3,14 +3,16 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ..database import get_db
 from ..deps import get_current_user, require_roles
 from ..models import ApprovalStatus, DeviceType, HeadscaleNode, Role, Station, User
-from ..schemas import HeadscaleApproveIn, HeadscaleLinkIn, HeadscaleNodeOut
+from ..schemas import HeadscaleApproveConfirmIn, HeadscaleApproveIn, HeadscaleLinkIn, HeadscaleNodeOut
 from ..services.audit import add_audit
+from ..services.confirmation_tokens import create_confirmation_token, verify_confirmation_token
 from ..services.headscale import sync_headscale_nodes
 from ..services.ping_monitor import ping_station
 
@@ -22,6 +24,8 @@ router = APIRouter()
 async def list_nodes(
     approval_status: ApprovalStatus | None = None,
     device_type: DeviceType | None = None,
+    online: bool | None = None,
+    linked: bool | None = None,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
@@ -30,7 +34,12 @@ async def list_nodes(
         stmt = stmt.where(HeadscaleNode.approval_status == approval_status.value)
     if device_type:
         stmt = stmt.where(HeadscaleNode.device_type == device_type.value)
-    return (await db.execute(stmt.order_by(HeadscaleNode.hostname))).scalars().all()
+    if online is not None:
+        stmt = stmt.where(HeadscaleNode.online == online)
+    if linked is not None:
+        stmt = stmt.where(HeadscaleNode.station_id.is_not(None) if linked else HeadscaleNode.station_id.is_(None))
+    nodes = (await db.execute(stmt.order_by(HeadscaleNode.hostname))).scalars().all()
+    return await _serialize_nodes(db, list(nodes))
 
 
 @router.get("/nodes/pending", response_model=list[HeadscaleNodeOut])
@@ -38,24 +47,43 @@ async def pending_nodes(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_roles(Role.admin)),
 ):
-    return (
+    nodes = (
         await db.execute(
             select(HeadscaleNode)
             .where(HeadscaleNode.approval_status == ApprovalStatus.pending.value)
             .order_by(HeadscaleNode.first_seen_at)
         )
     ).scalars().all()
+    return await _serialize_nodes(db, list(nodes))
+
+
+@router.post("/nodes/{node_id}/approval-preview")
+async def preview_node_approval(
+    node_id: int,
+    data: HeadscaleApproveIn,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(Role.admin)),
+):
+    node = await _node_or_404(db, node_id)
+    preview, payload = await _approval_preview(db, node, data)
+    preview["preview_token"] = create_confirmation_token("headscale-approval", payload) if preview["valid"] else None
+    return preview
 
 
 @router.post("/nodes/{node_id}/approve", response_model=HeadscaleNodeOut)
 async def approve_node(
     node_id: int,
-    data: HeadscaleApproveIn,
+    data: HeadscaleApproveConfirmIn,
     request: Request,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_roles(Role.admin)),
 ):
     node = await _node_or_404(db, node_id)
+    preview, payload = await _approval_preview(db, node, data)
+    if not preview["valid"]:
+        raise HTTPException(422, preview["errors"])
+    if not verify_confirmation_token(data.preview_token, "headscale-approval", payload):
+        raise HTTPException(409, "Approval preview expired or inventory changed; preview again")
     before = _audit_snapshot(node)
     if data.device_type == DeviceType.station:
         if data.station_id is None:
@@ -81,7 +109,7 @@ async def approve_node(
     await db.refresh(node)
     if node.station_id:
         await ping_station(node.station_id)
-    return node
+    return (await _serialize_nodes(db, [node]))[0]
 
 
 @router.post("/nodes/{node_id}/reject", response_model=HeadscaleNodeOut)
@@ -100,7 +128,7 @@ async def reject_node(
     add_audit(db, action="headscale.reject", entity_type="headscale_node", entity_id=node.id, actor=user, before=before, after=_audit_snapshot(node), request=request)
     await db.commit()
     await db.refresh(node)
-    return node
+    return (await _serialize_nodes(db, [node]))[0]
 
 
 @router.post("/nodes/{node_id}/link-station", response_model=HeadscaleNodeOut)
@@ -117,6 +145,14 @@ async def link_station(
         raise HTTPException(404, "Active station not found")
     if node.approval_status != ApprovalStatus.approved.value:
         raise HTTPException(409, "Node must be approved before linking")
+    payload = {
+        "node_id": node.id,
+        "station_id": station.id,
+        "node_station_id": node.station_id,
+        "station_existing_node_id": await _station_existing_node_id(db, station.id, node.id),
+    }
+    if not verify_confirmation_token(data.preview_token, "headscale-link", payload):
+        raise HTTPException(409, "Link preview expired or inventory changed; preview again")
     await _assert_link_available(db, node, station)
     before = _audit_snapshot(node)
     node.device_type = DeviceType.station.value
@@ -126,7 +162,44 @@ async def link_station(
     await db.commit()
     await db.refresh(node)
     await ping_station(station.id)
-    return node
+    return (await _serialize_nodes(db, [node]))[0]
+
+
+@router.post("/nodes/{node_id}/link-preview")
+async def preview_station_link(
+    node_id: int,
+    station_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(Role.admin)),
+):
+    node = await _node_or_404(db, node_id)
+    station = await db.get(Station, station_id)
+    errors = []
+    if not station or station.is_archived or not station.is_active:
+        errors.append("Active station not found")
+    if node.approval_status != ApprovalStatus.approved.value or node.device_type != DeviceType.station.value:
+        errors.append("Node must already be approved as a station device")
+    existing_id = await _station_existing_node_id(db, station_id, node.id) if station else None
+    if existing_id:
+        errors.append("Station is already linked to another Headscale node")
+    if node.station_id not in (None, station_id):
+        errors.append("Headscale node is already linked to another station")
+    payload = {
+        "node_id": node.id,
+        "station_id": station_id,
+        "node_station_id": node.station_id,
+        "station_existing_node_id": existing_id,
+    }
+    return {
+        "valid": not errors,
+        "errors": errors,
+        "node_id": node.id,
+        "node_hostname": node.hostname,
+        "station_id": station_id,
+        "station_code": station.station_code if station else None,
+        "station_name": station.name if station else None,
+        "preview_token": create_confirmation_token("headscale-link", payload) if not errors else None,
+    }
 
 
 @router.post("/nodes/{node_id}/unlink-station", response_model=HeadscaleNodeOut)
@@ -143,7 +216,7 @@ async def unlink_station(
     add_audit(db, action="headscale.unlink", entity_type="headscale_node", entity_id=node.id, actor=user, before=before, after=_audit_snapshot(node), request=request)
     await db.commit()
     await db.refresh(node)
-    return node
+    return (await _serialize_nodes(db, [node]))[0]
 
 
 @router.post("/sync")
@@ -184,3 +257,106 @@ def _audit_snapshot(node: HeadscaleNode) -> dict[str, object]:
         "station_id": node.station_id,
         "given_name": node.given_name,
     }
+
+
+async def _approval_preview(db: AsyncSession, node: HeadscaleNode, data: HeadscaleApproveIn):
+    errors: list[str] = []
+    station = (
+        await db.get(Station, data.station_id, options=[selectinload(Station.district)])
+        if data.station_id
+        else None
+    )
+    existing_id = None
+    if node.approval_status != ApprovalStatus.pending.value:
+        errors.append("Only pending nodes can use the approval workflow")
+    if data.device_type == DeviceType.station:
+        if not station or station.is_archived or not station.is_active:
+            errors.append("An active station is required for station devices")
+        else:
+            existing_id = await _station_existing_node_id(db, station.id, node.id)
+            if existing_id:
+                errors.append("Station is already linked to another Headscale node")
+            if node.station_id not in (None, station.id):
+                errors.append("Headscale node is already linked to another station")
+    elif data.station_id is not None:
+        errors.append("Phones, PCs, and servers cannot be linked to stations")
+    district = station.district.name if station and station.district else None
+    payload = {
+        "node_id": node.id,
+        "approval_status": node.approval_status,
+        "device_type": data.device_type.value,
+        "display_name": data.display_name,
+        "station_id": data.station_id,
+        "node_existing_station_id": node.station_id,
+        "station_existing_node_id": existing_id,
+        "vpn_ip": node.vpn_ip,
+    }
+    preview = {
+        "node_id": node.id,
+        "node_hostname": node.hostname,
+        "node_given_name": data.display_name or node.given_name,
+        "vpn_ip": node.vpn_ip,
+        "device_type": data.device_type,
+        "station_id": data.station_id,
+        "station_code": station.station_code if station else None,
+        "station_name": station.name if station else None,
+        "district": district,
+        "node_existing_station_id": node.station_id,
+        "station_existing_node_id": existing_id,
+        "valid": not errors,
+        "errors": errors,
+    }
+    return preview, payload
+
+
+async def _station_existing_node_id(db: AsyncSession, station_id: int, excluding_node_id: int) -> int | None:
+    return (
+        await db.execute(
+            select(HeadscaleNode.id).where(
+                HeadscaleNode.station_id == station_id,
+                HeadscaleNode.id != excluding_node_id,
+            )
+        )
+    ).scalar_one_or_none()
+
+
+async def _serialize_nodes(db: AsyncSession, nodes: list[HeadscaleNode]) -> list[HeadscaleNodeOut]:
+    if not nodes:
+        return []
+    station_ids = {node.station_id for node in nodes if node.station_id}
+    stations = (
+        await db.execute(select(Station).where(Station.id.in_(station_ids)))
+    ).scalars().all() if station_ids else []
+    station_by_id = {station.id: station for station in stations}
+    vpn_ips = {node.vpn_ip for node in nodes if node.vpn_ip}
+    all_nodes = (
+        await db.execute(select(HeadscaleNode).where(HeadscaleNode.vpn_ip.in_(vpn_ips)))
+    ).scalars().all() if vpn_ips else []
+    station_vpn_counts = dict(
+        (
+            await db.execute(
+                select(Station.vpn_ip, func.count(Station.id))
+                .where(Station.vpn_ip.in_(vpn_ips), Station.is_archived.is_(False))
+                .group_by(Station.vpn_ip)
+            )
+        ).all()
+    ) if vpn_ips else {}
+    nodes_by_vpn: dict[str, list[HeadscaleNode]] = {}
+    for item in all_nodes:
+        if item.vpn_ip:
+            nodes_by_vpn.setdefault(item.vpn_ip, []).append(item)
+    output = []
+    for node in nodes:
+        station = station_by_id.get(node.station_id)
+        duplicates = nodes_by_vpn.get(node.vpn_ip or "", [])
+        output.append(
+            HeadscaleNodeOut.model_validate(node).model_copy(
+                update={
+                    "linked_station_code": station.station_code if station else None,
+                    "linked_station_name": station.name if station else None,
+                    "duplicate_vpn_ip": len(duplicates) > 1 or station_vpn_counts.get(node.vpn_ip, 0) > 1,
+                    "duplicate_vpn_node_ids": [item.id for item in duplicates if item.id != node.id],
+                }
+            )
+        )
+    return output

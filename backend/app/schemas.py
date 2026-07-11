@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, EmailStr, Field
 
@@ -188,6 +188,10 @@ class HeadscaleNodeOut(ORMModel):
     approval_status: ApprovalStatus
     station_id: int | None
     approved_at: datetime | None
+    linked_station_code: str | None = None
+    linked_station_name: str | None = None
+    duplicate_vpn_ip: bool = False
+    duplicate_vpn_node_ids: list[int] = Field(default_factory=list)
 
 
 class HeadscaleApproveIn(BaseModel):
@@ -196,8 +200,32 @@ class HeadscaleApproveIn(BaseModel):
     display_name: str | None = Field(default=None, max_length=255)
 
 
+class HeadscaleApproveConfirmIn(HeadscaleApproveIn):
+    preview_token: str
+    confirmation: Literal["APPROVE AND LINK"]
+
+
+class HeadscaleApprovalPreviewOut(BaseModel):
+    node_id: int
+    node_hostname: str
+    node_given_name: str | None
+    vpn_ip: str | None
+    device_type: DeviceType
+    station_id: int | None
+    station_code: str | None
+    station_name: str | None
+    district: str | None
+    node_existing_station_id: int | None
+    station_existing_node_id: int | None
+    valid: bool
+    errors: list[str]
+    preview_token: str | None
+
+
 class HeadscaleLinkIn(BaseModel):
     station_id: int
+    preview_token: str
+    confirmation: Literal["LINK STATION"]
 
 
 class PingPoint(ORMModel):
@@ -338,6 +366,102 @@ class AuditLogOut(ORMModel):
     timestamp: datetime
     source: str
     ip_address: str | None
+
+
+class DistrictAssignmentIn(BaseModel):
+    station_code: str = Field(min_length=1, max_length=32)
+    district: str = Field(min_length=1, max_length=128)
+
+
+class DistrictPreviewIn(BaseModel):
+    assignments: list[DistrictAssignmentIn] = Field(min_length=1, max_length=1000)
+
+
+class DistrictApplyIn(DistrictPreviewIn):
+    preview_token: str
+    confirmation: Literal["ASSIGN DISTRICTS"]
+
+
+class DistrictAssignmentRow(BaseModel):
+    station_id: int
+    station_code: str
+    station_name: str
+    address: str
+    vpn_ip: str | None
+    headscale_hostname: str | None
+    current_district: str | None
+    proposed_district: str
+    proposed_district_id: int
+    changed: bool
+
+
+class OnboardingValidationError(BaseModel):
+    row: int
+    station_code: str | None
+    message: str
+
+
+class DistrictPreviewOut(BaseModel):
+    valid: bool
+    rows: list[DistrictAssignmentRow]
+    errors: list[OnboardingValidationError]
+    preview_token: str | None
+
+
+class DuplicateVpnStation(BaseModel):
+    station_id: int
+    station_code: str
+    station_name: str
+    status: StationStatus
+    last_seen_at: datetime | None
+    linked_node_id: int | None
+    linked_node_hostname: str | None
+    linked_node_approval_status: ApprovalStatus | None
+
+
+class DuplicateVpnGroup(BaseModel):
+    vpn_ip: str
+    stations: list[DuplicateVpnStation]
+    recommended_remediation: str
+
+
+class DuplicateVpnActionPreviewIn(BaseModel):
+    action: Literal["unlink_node", "clear_station_vpn", "select_canonical_node", "cancel"]
+    vpn_ip: str
+    station_id: int | None = None
+    node_id: int | None = None
+
+
+class DuplicateVpnActionApplyIn(DuplicateVpnActionPreviewIn):
+    preview_token: str
+    confirmation: Literal["APPLY VPN ACTION"]
+
+
+class ActionPreviewOut(BaseModel):
+    valid: bool
+    description: str
+    errors: list[str]
+    preview_token: str | None
+
+
+class DuplicateAlertGroup(BaseModel):
+    station_id: int
+    station_code: str
+    station_name: str
+    alert_type: AlertType
+    open_alert_count: int
+    oldest_alert_at: datetime
+    newest_alert_at: datetime
+    canonical_alert_id: int
+    proposed_resolve_alert_ids: list[int]
+    preview_token: str
+
+
+class DuplicateAlertApplyIn(BaseModel):
+    station_id: int
+    alert_type: AlertType
+    preview_token: str
+    confirmation: Literal["RESOLVE DUPLICATES"]
 
 
 StationDetailOut.model_rebuild()
