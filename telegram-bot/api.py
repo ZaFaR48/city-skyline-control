@@ -72,6 +72,12 @@ class BackendAPI:
 
     async def search_stations(self, query: str) -> list[dict[str, Any]]:
         data = await self._request("GET", "/api/stations", params={"q": query, "limit": 10})
+        if isinstance(data, dict):
+            return list(data.get("items") or [])
+        return list(data or [])
+
+    async def regions(self) -> list[dict[str, Any]]:
+        data = await self._request("GET", "/api/regions", params={"active": True})
         return list(data or [])
 
     async def create_station(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -88,6 +94,31 @@ class BackendAPI:
             f"/api/rustdesk/{station_id}",
             params={"rustdesk_id": rustdesk_id},
         )
+
+    async def registration_start(self, telegram_user: Any) -> dict[str, Any]:
+        data = await self._request(
+            "POST",
+            "/api/registrations/telegram/start",
+            json={
+                "telegram_user_id": telegram_user.id,
+                "telegram_username": telegram_user.username,
+                "first_name": telegram_user.first_name,
+                "last_name": telegram_user.last_name,
+            },
+        )
+        return dict(data or {})
+
+    async def pending_registrations(self) -> list[dict[str, Any]]:
+        data = await self._request("GET", "/api/registrations", params={"status": "pending"})
+        return list(data or [])
+
+    async def review_registration(self, registration_id: int, action: str, role: str | None = None) -> dict[str, Any]:
+        data = await self._request(
+            "POST",
+            f"/api/registrations/{registration_id}/review",
+            json={"action": action, "role": role},
+        )
+        return dict(data or {})
 
 
 def _error_detail(response: httpx.Response) -> str:

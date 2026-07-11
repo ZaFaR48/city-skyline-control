@@ -8,6 +8,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 from config import settings
+from access_middleware import AccessMiddleware
 from handlers.language import router as language_router
 from handlers.search import router as search_router
 from handlers.start import router as start_router
@@ -38,6 +39,7 @@ async def menu_placeholder(message: Message, state: FSMContext) -> None:
 
 def build_dispatcher() -> Dispatcher:
     dp = Dispatcher()
+    dp.message.outer_middleware(AccessMiddleware())
     dp.include_router(start_router)
     dp.include_router(language_router)
     dp.include_router(station_router)

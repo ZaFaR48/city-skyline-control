@@ -78,6 +78,10 @@ async def station_region(message: Message, state: FSMContext) -> None:
     if not value or is_skip(value):
         await message.answer(t(lang, "invalid_required"))
         return
+    allowed = {"ismoili somoni", "shohmansur", "sino", "firdavsi"}
+    if value.casefold() not in allowed:
+        await message.answer("Enter one Dushanbe district: Ismoili Somoni, Shohmansur, Sino, or Firdavsi.")
+        return
     await state.update_data(region=value)
     await state.set_state(AddStation.address)
     await message.answer(t(lang, "enter_address"))
@@ -208,16 +212,28 @@ async def station_confirm(message: Message, state: FSMContext) -> None:
         )
         return
 
+    try:
+        regions = await api.regions()
+    except BackendAPIError as exc:
+        await message.answer(f"{t(lang, 'api_error')} {exc.message}", reply_markup=confirm_keyboard(lang))
+        return
+    city = next((region for region in regions if region.get("code") == "dushanbe"), None)
+    district = next((region for region in regions if str(region.get("name", "")).casefold() == str(data["region"]).casefold()), None)
+    if not city or not district:
+        await message.answer("Canonical Dushanbe region data is unavailable.", reply_markup=confirm_keyboard(lang))
+        return
+
     station_payload = {
-        "code": data["code"],
+        "station_code": data["code"],
         "name": data["name"],
-        "region": data["region"],
+        "city_id": city["id"],
+        "district_id": district["id"],
         "address": data["address"],
         "vpn_ip": data["vpn_ip"],
         "local_ip": data["local_ip"],
         "rustdesk_id": data.get("rustdesk_id"),
-        "lat": data["lat"],
-        "lng": data["lng"],
+        "latitude": data["lat"],
+        "longitude": data["lng"],
     }
 
     try:
@@ -261,12 +277,8 @@ async def station_confirm(message: Message, state: FSMContext) -> None:
 
 def _missing_backend_fields(data: dict) -> list[str]:
     missing = []
-    if not data.get("vpn_ip"):
-        missing.append("VPN IP")
-    if not data.get("local_ip"):
-        missing.append("Local IP")
-    if data.get("lat") is None or data.get("lng") is None:
-        missing.append("GPS")
+    if not data.get("region"):
+        missing.append("District")
     return missing
 
 
