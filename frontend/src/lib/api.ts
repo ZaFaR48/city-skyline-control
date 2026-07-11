@@ -10,6 +10,7 @@ import type {
   DuplicateAlertGroup,
   DuplicateVpnGroup,
   HeadscaleApprovalPreview,
+  HeadscaleClassificationPreview,
   HeadscaleNode,
   Region,
   PasswordResetPreview,
@@ -18,6 +19,8 @@ import type {
   Station,
   StationApprovalPreview,
   StationRepairPreview,
+  StationLifecyclePreview,
+  SuspectedDuplicatePair,
   StationDetail,
   StationList,
   UptimeReportRow,
@@ -141,6 +144,31 @@ export const approveHeadscaleNode = (
   });
 export const rejectHeadscaleNode = (id: number) =>
   apiFetch<HeadscaleNode>(`/api/headscale/nodes/${id}/reject`, { method: "POST" });
+export const previewHeadscaleClassification = (
+  id: number,
+  deviceType: string,
+  stationId?: number,
+) =>
+  apiFetch<HeadscaleClassificationPreview>(`/api/headscale/nodes/${id}/classification-preview`, {
+    method: "POST",
+    body: JSON.stringify({ device_type: deviceType, station_id: stationId ?? null }),
+  });
+export const applyHeadscaleClassification = (
+  id: number,
+  deviceType: string,
+  stationId: number | undefined,
+  previewToken: string,
+  confirmation: string,
+) =>
+  apiFetch<HeadscaleNode>(`/api/headscale/nodes/${id}/classification`, {
+    method: "POST",
+    body: JSON.stringify({
+      device_type: deviceType,
+      station_id: stationId ?? null,
+      preview_token: previewToken,
+      confirmation,
+    }),
+  });
 export const getUptimeReport = (start: string, end: string, districtId?: number) =>
   apiFetch<UptimeReportRow[]>(
     `/api/reports/uptime${query({ start, end, district_id: districtId })}`,
@@ -243,6 +271,29 @@ export const applyStationRepair = (
   apiFetch<Station>(`/api/onboarding/stations/${stationId}/repair`, {
     method: "POST",
     body: JSON.stringify({ ...changes, preview_token: previewToken, confirmation }),
+  });
+export const getStationInventory = (view: string) =>
+  apiFetch<Station[]>(`/api/onboarding/station-inventory${query({ view })}`);
+export const previewStationLifecycle = (stationId: number, action: "archive" | "restore") =>
+  apiFetch<StationLifecyclePreview>(`/api/onboarding/stations/${stationId}/${action}-preview`, {
+    method: "POST",
+  });
+export const applyStationLifecycle = (
+  stationId: number,
+  action: "archive" | "restore",
+  previewToken: string,
+  confirmation: string,
+) =>
+  apiFetch<Station>(`/api/onboarding/stations/${stationId}/${action}`, {
+    method: "POST",
+    body: JSON.stringify({ preview_token: previewToken, confirmation }),
+  });
+export const getSuspectedDuplicates = () =>
+  apiFetch<SuspectedDuplicatePair[]>("/api/onboarding/suspected-duplicates");
+export const keepBothSuspectedDuplicates = (leftStationId: number, rightStationId: number) =>
+  apiFetch<{ status: string; changed: boolean }>("/api/onboarding/suspected-duplicates/keep-both", {
+    method: "POST",
+    body: JSON.stringify({ left_station_id: leftStationId, right_station_id: rightStationId }),
   });
 export const previewDistrictAssignments = (assignments: DistrictAssignment[]) =>
   apiFetch<DistrictPreview>("/api/onboarding/districts/preview", {

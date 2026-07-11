@@ -1,12 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, RefreshCw, ShieldCheck, X, XCircle } from "lucide-react";
+import { AlertTriangle, RefreshCw, Settings2, ShieldCheck, X, XCircle } from "lucide-react";
 import { Topbar } from "@/components/Topbar";
 import {
   approveHeadscaleNode,
+  applyHeadscaleClassification,
   getHeadscaleNodes,
   getStations,
   previewHeadscaleApproval,
+  previewHeadscaleClassification,
   rejectHeadscaleNode,
   syncHeadscale,
 } from "@/lib/api";
@@ -15,6 +17,7 @@ import type {
   ApprovalStatus,
   DeviceType,
   HeadscaleApprovalPreview,
+  HeadscaleClassificationPreview,
   HeadscaleNode,
   Station,
   User,
@@ -51,6 +54,9 @@ function HeadscalePage() {
   const [busy, setBusy] = useState(false);
   const [selections, setSelections] = useState<Record<number, Selection>>({});
   const [preview, setPreview] = useState<HeadscaleApprovalPreview | null>(null);
+  const [classificationPreview, setClassificationPreview] =
+    useState<HeadscaleClassificationPreview | null>(null);
+  const [classificationConfirmation, setClassificationConfirmation] = useState("");
 
   const load = useCallback(async () => {
     setError(null);
@@ -62,7 +68,7 @@ function HeadscalePage() {
           online: filters.online || undefined,
           linked: filters.linked || undefined,
         }),
-        getStations({ limit: 200 }),
+        getStations({ limit: 200, approval: "all" }),
       ]);
       setNodes(nodeRows);
       setStations(stationRows.items);
@@ -132,6 +138,58 @@ function HeadscalePage() {
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Approval failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function openClassificationPreview(node: HeadscaleNode) {
+    const selection = selections[node.id] ?? {
+      type: node.device_type,
+      stationId: node.station_id ? String(node.station_id) : "",
+    };
+    setBusy(true);
+    setError(null);
+    setClassificationConfirmation("");
+    try {
+      setClassificationPreview(
+        await previewHeadscaleClassification(
+          node.id,
+          selection.type,
+          selection.type === "station" && selection.stationId
+            ? Number(selection.stationId)
+            : undefined,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Classification preview failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmClassification() {
+    if (
+      !classificationPreview?.valid ||
+      !classificationPreview.preview_token ||
+      classificationConfirmation !== classificationPreview.confirmation_phrase
+    )
+      return;
+    setBusy(true);
+    setError(null);
+    try {
+      await applyHeadscaleClassification(
+        classificationPreview.node_id,
+        classificationPreview.proposed_device_type,
+        classificationPreview.proposed_station_id ?? undefined,
+        classificationPreview.preview_token,
+        classificationConfirmation,
+      );
+      setClassificationPreview(null);
+      setClassificationConfirmation("");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Classification update failed");
     } finally {
       setBusy(false);
     }
@@ -361,8 +419,66 @@ function HeadscalePage() {
                               <XCircle className="size-4" />
                             </button>
                           </div>
+                        ) : node.approval_status === "approved" ? (
+                          <div className="flex justify-end gap-2">
+                            <select
+                              value={selection.type}
+                              onChange={(event) =>
+                                setSelections((current) => ({
+                                  ...current,
+                                  [node.id]: {
+                                    ...selection,
+                                    type: event.target.value as DeviceType,
+                                    stationId:
+                                      event.target.value === "station" ? selection.stationId : "",
+                                  },
+                                }))
+                              }
+                              className="h-8 rounded border border-border bg-input text-xs"
+                            >
+                              {DEVICE_TYPES.map((type) => (
+                                <option key={type} value={type}>
+                                  {type.replaceAll("_", " ")}
+                                </option>
+                              ))}
+                            </select>
+                            {selection.type === "station" && (
+                              <select
+                                value={selection.stationId}
+                                onChange={(event) =>
+                                  setSelections((current) => ({
+                                    ...current,
+                                    [node.id]: { ...selection, stationId: event.target.value },
+                                  }))
+                                }
+                                className="h-8 max-w-52 rounded border border-border bg-input text-xs"
+                              >
+                                <option value="">Select station</option>
+                                {stations
+                                  .filter(
+                                    (station) =>
+                                      !station.headscale_linked || station.id === node.station_id,
+                                  )
+                                  .map((station) => (
+                                    <option key={station.id} value={station.id}>
+                                      {station.station_code} · {station.name}
+                                    </option>
+                                  ))}
+                              </select>
+                            )}
+                            <button
+                              disabled={
+                                busy || (selection.type === "station" && !selection.stationId)
+                              }
+                              onClick={() => openClassificationPreview(node)}
+                              className="grid size-8 place-items-center rounded border border-primary/40 text-primary disabled:opacity-40"
+                              title="Edit classification / Link station"
+                            >
+                              <Settings2 className="size-4" />
+                            </button>
+                          </div>
                         ) : (
-                          <div className="text-right text-xs text-muted-foreground">Reviewed</div>
+                          <div className="text-right text-xs text-muted-foreground">Rejected</div>
                         )}
                       </td>
                     )}
@@ -448,6 +564,90 @@ function HeadscalePage() {
                 className="h-9 rounded bg-primary px-4 text-xs text-primary-foreground disabled:opacity-40"
               >
                 Approve and link
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {classificationPreview && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-background/80 p-4 backdrop-blur-sm">
+          <div className="glass w-full max-w-2xl rounded-xl p-5 shadow-2xl">
+            <div className="mb-4 flex items-start justify-between">
+              <div>
+                <h2 className="font-semibold">Edit classification / Link station</h2>
+                <p className="text-xs text-muted-foreground">
+                  Approval remains approved. Linking does not publish the station.
+                </p>
+              </div>
+              <button onClick={() => setClassificationPreview(null)}>
+                <X className="size-5" />
+              </button>
+            </div>
+            <dl className="grid grid-cols-[11rem_1fr] gap-2 text-sm">
+              <dt className="text-muted-foreground">Node</dt>
+              <dd>
+                #{classificationPreview.node_id} · {classificationPreview.hostname}
+              </dd>
+              <dt className="text-muted-foreground">VPN IP</dt>
+              <dd className="font-mono">{classificationPreview.vpn_ip ?? "—"}</dd>
+              <dt className="text-muted-foreground">Connectivity</dt>
+              <dd>{classificationPreview.online ? "Online" : "Offline"}</dd>
+              <dt className="text-muted-foreground">Approval</dt>
+              <dd>{classificationPreview.approval_status}</dd>
+              <dt className="text-muted-foreground">Device type</dt>
+              <dd>
+                {classificationPreview.current_device_type} →{" "}
+                {classificationPreview.proposed_device_type}
+              </dd>
+              <dt className="text-muted-foreground">Station link</dt>
+              <dd>
+                {classificationPreview.current_station_code ?? "None"} →{" "}
+                {classificationPreview.proposed_station_code ?? "None"}
+              </dd>
+              <dt className="text-muted-foreground">Station VPN</dt>
+              <dd className="font-mono">
+                {classificationPreview.station_vpn_ip ?? "—"} →{" "}
+                {classificationPreview.proposed_station_vpn_ip ?? "—"}
+              </dd>
+            </dl>
+            {classificationPreview.vpn_replacement_warning && (
+              <div className="mt-4 rounded border border-warning/40 p-3 text-sm text-warning">
+                <AlertTriangle className="mr-2 inline size-4" />
+                {classificationPreview.vpn_replacement_warning}
+              </div>
+            )}
+            {classificationPreview.errors.length > 0 && (
+              <div className="mt-4 rounded border border-destructive/40 p-3 text-sm text-destructive">
+                {classificationPreview.errors.join(" · ")}
+              </div>
+            )}
+            {classificationPreview.valid && (
+              <label className="mt-4 block text-xs">
+                Type <code>{classificationPreview.confirmation_phrase}</code> to confirm
+                <input
+                  value={classificationConfirmation}
+                  onChange={(event) => setClassificationConfirmation(event.target.value)}
+                  className="mt-1 block h-9 w-full rounded border border-border bg-input px-3"
+                />
+              </label>
+            )}
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setClassificationPreview(null)}
+                className="h-9 rounded border border-border px-4 text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={
+                  busy ||
+                  !classificationPreview.valid ||
+                  classificationConfirmation !== classificationPreview.confirmation_phrase
+                }
+                onClick={confirmClassification}
+                className="h-9 rounded bg-primary px-4 text-xs text-primary-foreground disabled:opacity-40"
+              >
+                Apply classification
               </button>
             </div>
           </div>

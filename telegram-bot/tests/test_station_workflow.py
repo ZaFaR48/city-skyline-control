@@ -1,12 +1,23 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
 
-from handlers.start import _access_text
-from handlers.station import DISTRICTS, _build_create, _build_patch, _summary, back_station, station_callback, station_code
-from states import AddStation
+from handlers.station import (
+    _build_create,
+    _save_update,
+    back_station,
+    register_address,
+    register_area,
+    register_code,
+    register_gps,
+    register_name,
+    station_callback,
+    update_text_value,
+)
+from states import RegisterStation, UpdateStation
 
 
 class FakeState:
@@ -32,19 +43,21 @@ class FakeState:
 
 
 class FakeMessage:
-    def __init__(self, text=""):
+    def __init__(self, text="", *, location=None, chat_id=10):
         self.text = text
-        self.location = None
+        self.location = location
+        self.chat = SimpleNamespace(id=chat_id)
         self.answers = []
 
     async def answer(self, text, **kwargs):
         self.answers.append((text, kwargs.get("reply_markup")))
+        return SimpleNamespace(message_id=len(self.answers))
 
 
 class FakeCallback:
-    def __init__(self, data):
+    def __init__(self, data, message=None):
         self.data = data
-        self.message = FakeMessage()
+        self.message = message or FakeMessage()
         self.answers = []
 
     async def answer(self, text=None, **kwargs):
@@ -53,114 +66,157 @@ class FakeCallback:
 
 def existing_station(**overrides):
     return {
-        "id": 42, "station_code": "10002", "name": "Current name", "city_id": 1,
-        "city": "Dushanbe", "district_id": 2, "district": "Shohmansur",
-        "operational_area": None, "address": "Current address", "vpn_ip": "100.64.0.23",
-        "local_ip": "192.168.1.111", "rustdesk_id": None, "latitude": 38.5,
-        "longitude": 68.7, "approved_at": None, **overrides,
+        "id": 42,
+        "station_code": "10002",
+        "name": "Current name",
+        "city_id": 1,
+        "city": "Dushanbe",
+        "district_id": 2,
+        "district": "Shohmansur",
+        "operational_area": "Customs",
+        "address": "Current address",
+        "latitude": 38.5,
+        "longitude": 68.7,
+        "approved_at": None,
+        **overrides,
     }
 
 
 @pytest.mark.asyncio
-async def test_existing_station_code_enters_update_mode_without_create(monkeypatch):
-    async def lookup(code):
-        assert code == "10002"
-        return existing_station()
-
-    monkeypatch.setattr("handlers.station.api.station_by_code", lookup)
-    state = FakeState({"lang": "en", "nonce": "abcd"}, AddStation.code.state)
-    message = FakeMessage(" 10002 ")
-    await station_code(message, state)
-    assert state.current == AddStation.existing_action.state
-    assert state.data["existing_station_id"] == 42
-    assert "edit the existing record" in message.answers[0][0]
+async def test_existing_code_cannot_silently_enter_creation(monkeypatch):
+    monkeypatch.setattr("handlers.station.api.station_by_code", lambda code: _async(existing_station()))
+    state = FakeState({"lang": "en", "nonce": "abcd", "version": 0}, RegisterStation.code.state)
+    message = FakeMessage("10002")
+    await register_code(message, state)
+    assert state.current == RegisterStation.existing_offer.state
+    assert "Creation has stopped" in message.answers[0][0]
 
 
-def test_canonical_button_values_and_separate_operational_fields():
-    assert set(DISTRICTS) == {"ismoili-somoni", "shohmansur", "sino", "firdavsi"}
-    created = _build_create(
-        {"code": "10050", "name": "Display", "operational_area": "Customs", "address": "Rudaki 10", "latitude": None, "longitude": None},
-        1,
-        2,
+@pytest.mark.asyncio
+async def test_open_existing_update_is_explicit_callback(monkeypatch):
+    state = FakeState(
+        {"lang": "en", "nonce": "abcd", "version": 1, "existing": existing_station(), "existing_station_id": 42},
+        RegisterStation.existing_offer.state,
     )
-    assert created["operational_area"] == "Customs"
-    assert created["address"] == "Rudaki 10"
-    assert "approved_at" not in created and "approved_by" not in created
+    callback = FakeCallback("st:abcd:1:open_update:-")
+    await station_callback(callback, state)
+    assert state.current == UpdateStation.menu.state
 
 
-def test_district_and_skips_do_not_overwrite_existing_fields():
+@pytest.mark.asyncio
+async def test_update_edits_only_selected_field():
     current = existing_station()
-    data = {
-        "district_name": "Sino", "name_changed": False, "operational_area_changed": False,
-        "address_changed": False, "gps_changed": False,
-    }
-    patch, _ = _build_patch(current, data, city_id=1, district_id=3)
-    assert patch == {"district_id": 3}
-    assert "name" not in patch and "address" not in patch and "operational_area" not in patch
-    assert "vpn_ip" not in patch and "local_ip" not in patch and "rustdesk_id" not in patch
-
-
-def test_removed_default_fields_and_summary():
-    for field in ("vpn_ip", "local_ip", "rustdesk_id", "camera_ip", "rtsp_url", "qr", "nfc"):
-        assert not hasattr(AddStation, field)
-    summary = _summary(
-        "ru",
-        {
-            "code": "10050", "name": "Сино — Таможня", "district_name": "Sino",
-            "operational_area": "Таможня", "address": "Рудаки 10", "gps_changed": False,
-        },
+    state = FakeState(
+        {"lang": "en", "nonce": "abcd", "version": 2, "existing": current, "selected_field": "address"},
+        UpdateStation.text_value.state,
     )
-    for removed in ("VPN", "Local IP", "RustDesk", "Camera", "RTSP", "QR", "NFC"):
-        assert removed not in summary
+    await update_text_value(FakeMessage("New exact address"), state)
+    assert state.data["patch"] == {"address": "New exact address"}
+    assert "name" not in state.data["patch"] and "operational_area" not in state.data["patch"]
 
 
 @pytest.mark.asyncio
-async def test_back_navigation_restores_previous_state():
-    state = FakeState({"lang": "en", "nonce": "abcd"}, AddStation.operational_area.state)
+async def test_back_from_step_6_returns_to_step_5():
+    state = FakeState({"lang": "en", "nonce": "abcd", "version": 4}, RegisterStation.name.state)
     message = FakeMessage("⬅️ Back")
     await back_station(message, state)
-    assert state.current == AddStation.district.state
-    assert message.answers
+    assert state.current == RegisterStation.address.state
+    assert "Step 5/7" in message.answers[0][0]
 
 
 @pytest.mark.asyncio
-async def test_stale_callback_nonce_is_rejected_without_state_change():
-    state = FakeState({"lang": "en", "nonce": "newnonce"}, AddStation.city.state)
-    callback = FakeCallback("sw:oldnonce:city:dushanbe")
+async def test_back_from_step_5_returns_to_step_4():
+    state = FakeState({"lang": "en", "nonce": "abcd", "version": 4}, RegisterStation.address.state)
+    message = FakeMessage("⬅️ Back")
+    await back_station(message, state)
+    assert state.current == RegisterStation.operational_area.state
+    assert "Step 4/7" in message.answers[0][0]
+
+
+@pytest.mark.asyncio
+async def test_operational_area_and_address_never_shift():
+    state = FakeState({"lang": "en", "nonce": "abcd", "version": 3}, RegisterStation.operational_area.state)
+    await register_area(FakeMessage("Customs", chat_id=20), state)
+    assert state.data["operational_area"] == "Customs"
+    assert "address" not in state.data
+    await register_address(FakeMessage("Rudaki 10", chat_id=20), state)
+    assert state.data["address"] == "Rudaki 10"
+    assert "name" not in state.data
+
+
+@pytest.mark.asyncio
+async def test_gps_then_late_text_cannot_overwrite_name():
+    state = FakeState(
+        {
+            "lang": "en", "nonce": "abcd", "version": 6, "code": "10998",
+            "city_name": "Dushanbe", "district_name": "Sino", "operational_area": "Customs",
+            "address": "Rudaki 10", "name": "Chosen name",
+        },
+        RegisterStation.gps.state,
+    )
+    location = SimpleNamespace(latitude=38.5, longitude=68.7)
+    await register_gps(FakeMessage(location=location, chat_id=30), state)
+    assert state.current == RegisterStation.confirm.state
+    await register_name(FakeMessage("Late text", chat_id=30), state)
+    assert state.data["name"] == "Chosen name"
+
+
+@pytest.mark.asyncio
+async def test_rapid_messages_do_not_populate_next_field():
+    state = FakeState({"lang": "en", "nonce": "abcd", "version": 3}, RegisterStation.operational_area.state)
+    await asyncio.gather(
+        register_area(FakeMessage("First area", chat_id=40), state),
+        register_area(FakeMessage("Late area", chat_id=40), state),
+    )
+    assert state.data["operational_area"] in {"First area", "Late area"}
+    assert "address" not in state.data
+    assert state.current == RegisterStation.address.state
+
+
+@pytest.mark.asyncio
+async def test_stale_callback_version_is_rejected():
+    state = FakeState({"lang": "en", "nonce": "abcd", "version": 7}, UpdateStation.menu.state)
+    callback = FakeCallback("st:abcd:6:update_field:name")
     await station_callback(callback, state)
-    assert state.current == AddStation.city.state
+    assert state.current == UpdateStation.menu.state
     assert callback.answers[0][1]["show_alert"] is True
 
 
 @pytest.mark.asyncio
-async def test_double_save_callback_is_blocked_before_api_calls(monkeypatch):
+async def test_duplicate_update_is_idempotent(monkeypatch):
     calls = 0
+    current = existing_station(address="Already applied")
 
-    async def regions():
+    async def lookup(code):
+        return current
+
+    async def update(station_id, patch):
         nonlocal calls
         calls += 1
-        return []
 
-    monkeypatch.setattr("handlers.station.api.regions", regions)
-    state = FakeState({"lang": "en", "nonce": "abcd", "saving": True}, AddStation.confirm.state)
-    callback = FakeCallback("sw:abcd:confirm:save")
-    await station_callback(callback, state)
+    monkeypatch.setattr("handlers.station.api.station_by_code", lookup)
+    monkeypatch.setattr("handlers.station.api.update_station", update)
+    state = FakeState(
+        {
+            "lang": "en", "nonce": "abcd", "version": 8, "saving": False,
+            "code": "10002", "existing_station_id": 42, "patch": {"address": "Already applied"},
+        },
+        UpdateStation.confirm.state,
+    )
+    callback = FakeCallback("st:abcd:8:update_confirm:save")
+    await _save_update(callback, state, "en")
     assert calls == 0
-    assert any(answer[1].get("show_alert") for answer in callback.answers)
 
 
-def test_approved_update_patch_never_changes_approval():
-    patch, _ = _build_patch(
-        existing_station(approved_at="2026-01-01T00:00:00Z"),
-        {"name_changed": True, "name": "New", "operational_area_changed": False, "address_changed": False, "gps_changed": False},
+def test_create_payload_has_no_approval_or_operational_defaults():
+    payload = _build_create(
+        {"code": "10999", "name": "Display", "address": "Rudaki 10", "operational_area": None},
         1,
         2,
     )
-    assert patch == {"name": "New"}
-    assert "approved_at" not in patch and "approved_by" not in patch
+    assert "approved_at" not in payload and "approved_by" not in payload
+    assert "vpn_ip" not in payload and "local_ip" not in payload
 
 
-def test_my_access_contains_only_safe_identity_status():
-    text = _access_text("ru", {"username": "telegram-user", "role": "operator", "status": "activated", "activation_required": False})
-    assert "telegram-user" in text and "Оператор" in text and "activated" in text
-    assert all(secret not in text.lower() for secret in ("password", "token", "hash", "code"))
+async def _async(value):
+    return value

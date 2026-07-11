@@ -171,6 +171,27 @@ export interface HeadscaleApprovalPreview {
   vpn_replacement_warning: string | null;
 }
 
+export interface HeadscaleClassificationPreview {
+  node_id: number;
+  hostname: string;
+  vpn_ip: string | null;
+  online: boolean;
+  approval_status: ApprovalStatus;
+  current_device_type: DeviceType;
+  current_station_id: number | null;
+  current_station_code: string | null;
+  proposed_device_type: DeviceType;
+  proposed_station_id: number | null;
+  proposed_station_code: string | null;
+  station_vpn_ip: string | null;
+  proposed_station_vpn_ip: string | null;
+  vpn_replacement_warning: string | null;
+  confirmation_phrase: string;
+  valid: boolean;
+  errors: string[];
+  preview_token: string | null;
+}
+
 export interface DistrictHealth {
   id: number;
   code: string;
@@ -276,6 +297,41 @@ export interface StationRepairPreview {
   confirmation_phrase: string;
   valid: boolean;
   preview_token: string | null;
+}
+
+export interface StationLifecyclePreview {
+  station_id: number;
+  station_code: string;
+  action: "archive" | "restore";
+  warnings: string[];
+  linked_node_id: number | null;
+  active_alerts: number;
+  cameras: number;
+  history_records: number;
+  confirmation_phrase: string;
+  valid: boolean;
+  errors: string[];
+  preview_token: string | null;
+}
+
+export interface SuspectedDuplicateStation {
+  station_id: number;
+  station_code: string;
+  name: string;
+  approval_status: string;
+  is_active: boolean;
+  is_archived: boolean;
+  linked_node_id: number | null;
+  active_alerts: number;
+  cameras: number;
+  history_records: number;
+}
+
+export interface SuspectedDuplicatePair {
+  left: SuspectedDuplicateStation;
+  right: SuspectedDuplicateStation;
+  reasons: string[];
+  recommendation: string;
 }
 
 export interface TelegramLinkPreview {

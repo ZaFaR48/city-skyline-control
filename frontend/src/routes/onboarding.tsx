@@ -4,9 +4,11 @@ import { AlertTriangle, Check, Copy, Download, ShieldCheck, Upload, Wrench, X } 
 import { Topbar } from "@/components/Topbar";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
+  applyHeadscaleClassification,
   applyDistrictAssignments,
   applyStationApproval,
   applyStationRepair,
+  applyStationLifecycle,
   applyDistrictCsv,
   applyDuplicateVpnAction,
   downloadDistrictTemplate,
@@ -14,12 +16,17 @@ import {
   getDuplicateAlertReport,
   getDuplicateVpnReport,
   getHeadscaleNodes,
+  getStationInventory,
+  getSuspectedDuplicates,
+  keepBothSuspectedDuplicates,
   getStationApprovalInventory,
   previewDistrictAssignments,
   previewDistrictCsv,
   previewDuplicateVpnAction,
   previewStationApproval,
   previewStationRepair,
+  previewStationLifecycle,
+  previewHeadscaleClassification,
 } from "@/lib/api";
 import { getStoredUser } from "@/lib/auth";
 import type {
@@ -29,9 +36,12 @@ import type {
   DuplicateAlertGroup,
   DuplicateVpnGroup,
   HeadscaleNode,
+  HeadscaleClassificationPreview,
   Station,
   StationApprovalPreview,
   StationRepairPreview,
+  StationLifecyclePreview,
+  SuspectedDuplicatePair,
   User,
 } from "@/lib/types";
 import { useI18n } from "@/lib/i18n";
@@ -42,7 +52,7 @@ export const Route = createFileRoute("/onboarding")({
 });
 
 const DISTRICTS = ["Ismoili Somoni", "Shohmansur", "Sino", "Firdavsi"];
-type Tab = "approval" | "districts" | "vpn" | "alerts";
+type Tab = "inventory" | "approval" | "districts" | "vpn" | "alerts";
 type VpnAction = {
   action: "unlink_node" | "clear_station_vpn" | "select_canonical_node" | "cancel";
   vpn_ip: string;
@@ -50,9 +60,19 @@ type VpnAction = {
   node_id?: number;
 };
 
+const INVENTORY_FILTERS = [
+  "all",
+  "pending",
+  "approved",
+  "archived",
+  "missing_headscale",
+  "suspected_duplicate",
+  "data_quality",
+] as const;
+
 function OnboardingPage() {
   const user = getStoredUser<User>();
-  const [tab, setTab] = useState<Tab>("approval");
+  const [tab, setTab] = useState<Tab>("inventory");
   if (user?.role !== "admin") {
     return (
       <>
@@ -73,6 +93,9 @@ function OnboardingPage() {
       />
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
         <div className="glass rounded-xl p-2 inline-flex gap-1">
+          <TabButton active={tab === "inventory"} onClick={() => setTab("inventory")}>
+            Station inventory
+          </TabButton>
           <TabButton active={tab === "approval"} onClick={() => setTab("approval")}>
             Station approval
           </TabButton>
@@ -86,12 +109,595 @@ function OnboardingPage() {
             Duplicate alert dry-run
           </TabButton>
         </div>
+        {tab === "inventory" && <StationInventoryWorkflow />}
         {tab === "approval" && <StationApprovalWorkflow />}
         {tab === "districts" && <DistrictWorkflow />}
         {tab === "vpn" && <DuplicateVpnWorkflow />}
         {tab === "alerts" && <DuplicateAlertWorkflow />}
       </div>
     </>
+  );
+}
+
+function StationInventoryWorkflow() {
+  const { district: districtName } = useI18n();
+  const [view, setView] = useState<(typeof INVENTORY_FILTERS)[number]>("all");
+  const [stations, setStations] = useState<Station[]>([]);
+  const [nodes, setNodes] = useState<HeadscaleNode[]>([]);
+  const [duplicates, setDuplicates] = useState<SuspectedDuplicatePair[]>([]);
+  const [dismissedPairs, setDismissedPairs] = useState<Set<string>>(new Set());
+  const [repairStation, setRepairStation] = useState<Station | null>(null);
+  const [publishStation, setPublishStation] = useState<Station | null>(null);
+  const [lifecycle, setLifecycle] = useState<StationLifecyclePreview | null>(null);
+  const [approval, setApproval] = useState<StationApprovalPreview | null>(null);
+  const [approvalConfirmation, setApprovalConfirmation] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setError(null);
+    try {
+      const [stationRows, nodeRows, duplicateRows] = await Promise.all([
+        getStationInventory(view),
+        getHeadscaleNodes({ approval_status: "approved" }),
+        getSuspectedDuplicates(),
+      ]);
+      setStations(stationRows);
+      setNodes(nodeRows);
+      setDuplicates(duplicateRows);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Station inventory unavailable");
+    }
+  }, [view]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function openLifecycle(station: Station, action: "archive" | "restore") {
+    try {
+      setLifecycle(await previewStationLifecycle(station.id, action));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Lifecycle preview failed");
+    }
+  }
+
+  async function prepare(station: Station) {
+    try {
+      setApprovalConfirmation("");
+      setApproval(await previewStationApproval(station.id, "approve"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Production preview failed");
+    }
+  }
+
+  async function duplicateStation(stationId: number, action: "repair" | "archive") {
+    try {
+      if (action === "archive") {
+        setLifecycle(await previewStationLifecycle(stationId, "archive"));
+      } else {
+        const all = await getStationInventory("all");
+        const station = all.find((item) => item.id === stationId);
+        if (station) setRepairStation(station);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Duplicate action preview failed");
+    }
+  }
+
+  async function approve() {
+    if (!approval?.preview_token || approvalConfirmation !== approval.confirmation_phrase) return;
+    await applyStationApproval(
+      approval.station_id,
+      "approve",
+      approval.preview_token,
+      approvalConfirmation,
+    );
+    setApproval(null);
+    setMessage("Station published to Dashboard after explicit production approval.");
+    await load();
+  }
+
+  return (
+    <section className="space-y-4">
+      {error && <Notice tone="error">{error}</Notice>}
+      {message && <Notice>{message}</Notice>}
+      <div className="glass rounded-xl p-4">
+        <h2 className="font-semibold">Station inventory</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Linking Headscale does not publish a station. Production approval publishes it. GPS only
+          controls map visibility.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {INVENTORY_FILTERS.map((item) => (
+            <button
+              key={item}
+              onClick={() => setView(item)}
+              className={`rounded border px-3 py-1 text-xs ${view === item ? "border-primary text-primary" : "border-border"}`}
+            >
+              {item.replaceAll("_", " ")}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="glass max-h-[620px] overflow-auto rounded-xl">
+        <table className="w-full min-w-[1850px] text-sm">
+          <thead className="sticky top-0 bg-panel text-left text-xs uppercase text-muted-foreground">
+            <tr>
+              <th className="p-3">Code</th>
+              <th>Name</th>
+              <th>City</th>
+              <th>District</th>
+              <th>Operational area</th>
+              <th>Address</th>
+              <th>GPS</th>
+              <th>VPN</th>
+              <th>Headscale node</th>
+              <th>Approval</th>
+              <th>Record state</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stations.map((station) => (
+              <tr key={station.id} className="border-t border-border align-top">
+                <td className="p-3 font-mono">{station.station_code}</td>
+                <td>{station.name}</td>
+                <td>{station.city}</td>
+                <td>{districtName(station.district)}</td>
+                <td>{station.operational_area ?? "—"}</td>
+                <td>{station.address || "—"}</td>
+                <td className="font-mono text-xs">
+                  {station.latitude === null ? "—" : `${station.latitude}, ${station.longitude}`}
+                </td>
+                <td className="font-mono text-xs">{station.vpn_ip ?? "—"}</td>
+                <td>{station.headscale_hostname ?? "—"}</td>
+                <td>{station.approved_at ? "Production approved" : "Pending"}</td>
+                <td>
+                  {station.is_archived ? "Archived" : station.is_active ? "Active" : "Inactive"}
+                </td>
+                <td className="p-3">
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => setRepairStation(station)}
+                      className="rounded border border-border px-2 py-1 text-xs"
+                    >
+                      Repair data
+                    </button>
+                    {!station.is_archived && (
+                      <button
+                        onClick={() => setPublishStation(station)}
+                        className="rounded border border-primary/40 px-2 py-1 text-xs text-primary"
+                      >
+                        Link Headscale
+                      </button>
+                    )}
+                    {!station.approved_at && !station.is_archived && (
+                      <button
+                        onClick={() => prepare(station)}
+                        className="rounded border border-success/40 px-2 py-1 text-xs text-success"
+                      >
+                        Prepare for production
+                      </button>
+                    )}
+                    <button
+                      onClick={() =>
+                        openLifecycle(station, station.is_archived ? "restore" : "archive")
+                      }
+                      className="rounded border border-warning/40 px-2 py-1 text-xs text-warning"
+                    >
+                      {station.is_archived ? "Restore archived station" : "Archive station"}
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {duplicates.length > 0 && (
+        <div className="glass rounded-xl p-4">
+          <h3 className="font-semibold">Suspected duplicate dry-run</h3>
+          <p className="text-xs text-muted-foreground">
+            Indicators only; no records are merged, deleted, or archived automatically.
+          </p>
+          <div className="mt-3 space-y-3">
+            {duplicates
+              .filter(
+                (pair) => !dismissedPairs.has(`${pair.left.station_id}-${pair.right.station_id}`),
+              )
+              .map((pair) => (
+                <div
+                  key={`${pair.left.station_id}-${pair.right.station_id}`}
+                  className="rounded border border-border p-3 text-sm"
+                >
+                  <div className="font-medium">
+                    {pair.left.station_code} · {pair.left.name} ↔ {pair.right.station_code} ·{" "}
+                    {pair.right.name}
+                  </div>
+                  <div className="mt-1 text-xs">Reasons: {pair.reasons.join("; ")}</div>
+                  <div className="text-xs text-muted-foreground">
+                    Nodes: {pair.left.linked_node_id ?? "none"} /{" "}
+                    {pair.right.linked_node_id ?? "none"}; approvals: {pair.left.approval_status} /{" "}
+                    {pair.right.approval_status}; history: {pair.left.history_records} /{" "}
+                    {pair.right.history_records}
+                  </div>
+                  <div className="mt-1 text-xs">{pair.recommendation}</div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      onClick={async () => {
+                        await keepBothSuspectedDuplicates(
+                          pair.left.station_id,
+                          pair.right.station_id,
+                        );
+                        setMessage("Keep-both decision recorded; no station data changed.");
+                      }}
+                      className="rounded border border-success/40 px-2 py-1 text-xs text-success"
+                    >
+                      Keep both
+                    </button>
+                    {[pair.left, pair.right].map((item) => (
+                      <span key={item.station_id} className="contents">
+                        <button
+                          onClick={() => duplicateStation(item.station_id, "repair")}
+                          className="rounded border border-border px-2 py-1 text-xs"
+                        >
+                          Repair {item.station_code}
+                        </button>
+                        <button
+                          onClick={() => duplicateStation(item.station_id, "archive")}
+                          className="rounded border border-warning/40 px-2 py-1 text-xs text-warning"
+                        >
+                          Archive {item.station_code}
+                        </button>
+                      </span>
+                    ))}
+                    <button
+                      onClick={() =>
+                        setDismissedPairs((current) =>
+                          new Set(current).add(`${pair.left.station_id}-${pair.right.station_id}`),
+                        )
+                      }
+                      className="rounded border border-border px-2 py-1 text-xs"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ))}
+          </div>
+        </div>
+      )}
+      {repairStation && (
+        <StationRepairDialog
+          station={repairStation}
+          close={() => setRepairStation(null)}
+          applied={async () => {
+            setRepairStation(null);
+            await load();
+          }}
+        />
+      )}
+      {lifecycle && (
+        <StationLifecycleDialog
+          preview={lifecycle}
+          close={() => setLifecycle(null)}
+          applied={async () => {
+            setLifecycle(null);
+            setMessage(`Station ${lifecycle.station_code} ${lifecycle.action} completed.`);
+            await load();
+          }}
+        />
+      )}
+      {publishStation && (
+        <PublishStationDialog
+          station={publishStation}
+          nodes={nodes}
+          close={() => {
+            setPublishStation(null);
+            void load();
+          }}
+          linked={async () => {
+            setPublishStation(null);
+            setMessage(
+              "Station published after separate Headscale link and production confirmations.",
+            );
+            await load();
+          }}
+        />
+      )}
+      {approval && (
+        <StationApprovalDialog
+          preview={approval}
+          confirmation={approvalConfirmation}
+          setConfirmation={setApprovalConfirmation}
+          apply={approve}
+          close={() => setApproval(null)}
+        />
+      )}
+    </section>
+  );
+}
+
+function StationLifecycleDialog({
+  preview,
+  close,
+  applied,
+}: {
+  preview: StationLifecyclePreview;
+  close: () => void;
+  applied: () => Promise<void>;
+}) {
+  const [confirmation, setConfirmation] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  async function apply() {
+    if (!preview.preview_token || confirmation !== preview.confirmation_phrase) return;
+    try {
+      await applyStationLifecycle(
+        preview.station_id,
+        preview.action,
+        preview.preview_token,
+        confirmation,
+      );
+      await applied();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Station lifecycle action failed");
+    }
+  }
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4">
+      <div className="glass w-full max-w-xl rounded-xl bg-background p-5">
+        <h2 className="font-semibold capitalize">
+          {preview.action} station {preview.station_code}
+        </h2>
+        <p className="text-xs text-muted-foreground">
+          This is a soft lifecycle action. The station is never hard-deleted.
+        </p>
+        <dl className="my-4 grid grid-cols-2 gap-2 text-sm">
+          <PreviewValue
+            label="Linked node"
+            value={preview.linked_node_id ? `#${preview.linked_node_id}` : null}
+          />
+          <PreviewValue label="Active alerts" value={String(preview.active_alerts)} />
+          <PreviewValue label="Cameras" value={String(preview.cameras)} />
+          <PreviewValue label="History records" value={String(preview.history_records)} />
+        </dl>
+        {preview.warnings.map((warning) => (
+          <div key={warning} className="text-sm text-warning">
+            ⚠ {warning}
+          </div>
+        ))}
+        {preview.errors.map((item) => (
+          <div key={item} className="text-sm text-destructive">
+            {item}
+          </div>
+        ))}
+        {error && <Notice tone="error">{error}</Notice>}
+        {preview.valid && (
+          <label className="mt-4 block text-xs">
+            Type <code>{preview.confirmation_phrase}</code> to confirm
+            <input
+              value={confirmation}
+              onChange={(event) => setConfirmation(event.target.value)}
+              className="mt-1 block h-9 w-full rounded border border-border bg-input px-3"
+            />
+          </label>
+        )}
+        <div className="mt-5 flex justify-end gap-2">
+          <button onClick={close} className="h-9 rounded border border-border px-4">
+            Cancel
+          </button>
+          <button
+            disabled={!preview.valid || confirmation !== preview.confirmation_phrase}
+            onClick={apply}
+            className="h-9 rounded bg-primary px-4 text-primary-foreground disabled:opacity-40"
+          >
+            Confirm {preview.action}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PublishStationDialog({
+  station,
+  nodes,
+  close,
+  linked,
+}: {
+  station: Station;
+  nodes: HeadscaleNode[];
+  close: () => void;
+  linked: () => Promise<void>;
+}) {
+  const { t } = useI18n();
+  const [nodeId, setNodeId] = useState("");
+  const [preview, setPreview] = useState<HeadscaleClassificationPreview | null>(null);
+  const [confirmation, setConfirmation] = useState("");
+  const [production, setProduction] = useState<StationApprovalPreview | null>(null);
+  const [productionConfirmation, setProductionConfirmation] = useState("");
+  const [linkApplied, setLinkApplied] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function runPreview() {
+    if (!nodeId) return;
+    try {
+      setConfirmation("");
+      setPreview(await previewHeadscaleClassification(Number(nodeId), "station", station.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Headscale link preview failed");
+    }
+  }
+  async function applyLink() {
+    if (!preview?.preview_token || confirmation !== preview.confirmation_phrase) return;
+    try {
+      await applyHeadscaleClassification(
+        preview.node_id,
+        "station",
+        station.id,
+        preview.preview_token,
+        confirmation,
+      );
+      setLinkApplied(true);
+      setProductionConfirmation("");
+      setProduction(await previewStationApproval(station.id, "approve"));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Headscale link failed");
+    }
+  }
+  async function publish() {
+    if (!production?.preview_token || productionConfirmation !== production.confirmation_phrase)
+      return;
+    try {
+      await applyStationApproval(
+        station.id,
+        "approve",
+        production.preview_token,
+        productionConfirmation,
+      );
+      await linked();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Production approval failed");
+    }
+  }
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4">
+      <div className="glass w-full max-w-2xl rounded-xl bg-background p-5">
+        <h2 className="font-semibold">Publish station to Dashboard · steps 1–5</h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Linking Headscale does not publish the station. After linking, use the separate “Prepare
+          for production” confirmation.
+        </p>
+        <div className="my-4 rounded border border-border p-3 text-sm">
+          <div>
+            1. Station: {station.station_code} · {station.name}
+          </div>
+          <div>
+            2. City/district: {station.city} · {station.district ?? "missing"}
+          </div>
+          <div>
+            2. Area/address: {station.operational_area ?? "missing"} ·{" "}
+            {station.address || "missing"}
+          </div>
+          <div>
+            4. GPS:{" "}
+            {station.latitude === null
+              ? "missing — map visibility disabled"
+              : `${station.latitude}, ${station.longitude}`}
+          </div>
+        </div>
+        <label className="block text-xs">
+          3. Select one approved Headscale node
+          <select
+            value={nodeId}
+            onChange={(event) => {
+              setNodeId(event.target.value);
+              setPreview(null);
+            }}
+            className="mt-1 block h-9 w-full rounded border border-border bg-input px-3"
+          >
+            <option value="">Select station node</option>
+            {nodes
+              .filter((node) => node.station_id === null || node.station_id === station.id)
+              .map((node) => (
+                <option key={node.id} value={node.id}>
+                  #{node.id} · {node.hostname} · {node.vpn_ip ?? "no VPN"} ·{" "}
+                  {node.online ? "online" : "offline"} · {node.device_type}
+                </option>
+              ))}
+          </select>
+        </label>
+        <button
+          disabled={!nodeId}
+          onClick={runPreview}
+          className="mt-3 h-9 rounded border border-primary/40 px-4 text-primary disabled:opacity-40"
+        >
+          4. Preview node classification and VPN sync
+        </button>
+        {preview && (
+          <div className="mt-4 space-y-2 text-sm">
+            <div>
+              Node: #{preview.node_id} · {preview.hostname} ·{" "}
+              {preview.online ? "online" : "offline"}
+            </div>
+            <div>
+              Classification: {preview.current_device_type} → {preview.proposed_device_type}
+            </div>
+            <div>
+              Station link: {preview.current_station_code ?? "none"} →{" "}
+              {preview.proposed_station_code}
+            </div>
+            <div className="font-mono">
+              VPN: {preview.station_vpn_ip ?? "—"} → {preview.proposed_station_vpn_ip ?? "—"}
+            </div>
+            {preview.errors.map((item) => (
+              <div key={item} className="text-destructive">
+                {item}
+              </div>
+            ))}
+            {preview.valid && (
+              <label className="block text-xs">
+                5. Type <code>{preview.confirmation_phrase}</code>
+                <input
+                  value={confirmation}
+                  onChange={(event) => setConfirmation(event.target.value)}
+                  className="mt-1 block h-9 w-full rounded border border-border bg-input px-3"
+                />
+              </label>
+            )}
+          </div>
+        )}
+        {linkApplied && production && (
+          <div className="mt-4 rounded border border-success/40 p-3">
+            <div className="font-medium text-success">
+              Headscale link complete. The station is still pending.
+            </div>
+            <div className="mt-2 text-sm">6. Separate production approval</div>
+            {production.checklist.map((item) => (
+              <div key={item.key} className="flex justify-between text-xs">
+                <span>{t(`approval.${item.key}`)}</span>
+                <span>{item.ready ? t("approval.ready") : t("approval.blocked")}</span>
+              </div>
+            ))}
+            {production.valid && (
+              <label className="mt-3 block text-xs">
+                Type <code>{production.confirmation_phrase}</code>
+                <input
+                  value={productionConfirmation}
+                  onChange={(event) => setProductionConfirmation(event.target.value)}
+                  className="mt-1 block h-9 w-full rounded border border-border bg-input px-3"
+                />
+              </label>
+            )}
+          </div>
+        )}
+        {error && <Notice tone="error">{error}</Notice>}
+        <div className="mt-5 flex justify-end gap-2">
+          <button onClick={close} className="h-9 rounded border border-border px-4">
+            Cancel
+          </button>
+          {!linkApplied ? (
+            <button
+              disabled={!preview?.valid || confirmation !== preview.confirmation_phrase}
+              onClick={applyLink}
+              className="h-9 rounded bg-primary px-4 text-primary-foreground disabled:opacity-40"
+            >
+              Link node (does not publish)
+            </button>
+          ) : (
+            <button
+              disabled={
+                !production?.valid || productionConfirmation !== production.confirmation_phrase
+              }
+              onClick={publish}
+              className="h-9 rounded bg-success px-4 text-success-foreground disabled:opacity-40"
+            >
+              6. Publish station to Dashboard
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -318,11 +924,12 @@ function StationApprovalDialog({
           </div>
         )}
         {preview.warning && <Notice>{preview.warning}</Notice>}
-        {preview.errors.map((item) => (
-          <p key={item} className="mt-2 text-sm text-destructive">
-            {item}
-          </p>
-        ))}
+        {preview.action === "revoke" &&
+          preview.errors.map((item) => (
+            <p key={item} className="mt-2 text-sm text-destructive">
+              {item}
+            </p>
+          ))}
         {preview.valid && (
           <label className="block text-xs mt-4">
             Type <span className="font-mono">{preview.confirmation_phrase}</span> to confirm

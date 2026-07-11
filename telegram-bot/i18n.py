@@ -15,7 +15,8 @@ LANGUAGE_NAMES = {
 
 MENU = {
     "tj": {
-        "new_station": "📍 Стансияи нав",
+        "register_station": "➕ Сабти стансияи нав",
+        "update_station": "✏️ Нав кардани стансияи мавҷуда",
         "search_station": "🔍 Ҷустуҷӯи стансия",
         "scan_qr": "📷 Скан кардани QR",
         "rustdesk": "🖥 RustDesk",
@@ -28,7 +29,8 @@ MENU = {
         "settings": "⚙️ Танзимот",
     },
     "ru": {
-        "new_station": "📍 Новая станция",
+        "register_station": "➕ Зарегистрировать новую станцию",
+        "update_station": "✏️ Обновить существующую станцию",
         "search_station": "🔍 Поиск станции",
         "scan_qr": "📷 Сканировать QR",
         "rustdesk": "🖥 RustDesk",
@@ -41,7 +43,8 @@ MENU = {
         "settings": "⚙️ Настройки",
     },
     "en": {
-        "new_station": "📍 New station",
+        "register_station": "➕ Register a new station",
+        "update_station": "✏️ Update an existing station",
         "search_station": "🔍 Search station",
         "scan_qr": "📷 Scan QR",
         "rustdesk": "🖥 RustDesk",
@@ -183,6 +186,17 @@ TEXT["ru"].update({
     "saved_existing_pending": "Станция {code} обновлена. Она остаётся на рассмотрении для production.",
     "saved_new_pending": "Станция создана. Она остаётся на рассмотрении для production.",
     "label_city": "Город", "label_operational_area": "Зона / ориентир",
+    "register_code": "Введите новый код станции. Существующий код нельзя использовать для создания.",
+    "update_code": "Введите точный код существующей станции.",
+    "existing_create_blocked": "Станция {code} уже существует. Создание остановлено.",
+    "open_existing_update": "Открыть обновление существующей станции",
+    "update_fields": "Выберите только одно поле для изменения:",
+    "field_city": "Город", "field_district": "Район", "field_area": "Зона / ориентир",
+    "field_address": "Точный адрес", "field_name": "Отображаемое название", "field_gps": "GPS",
+    "enter_new_value": "Введите новое значение для поля «{field}».",
+    "update_not_found": "Станция с таким точным кодом не найдена.",
+    "field_saved": "Изменено только выбранное поле. Статус допуска не изменён.",
+    "create_flow": "Регистрация новой станции", "update_flow": "Обновление существующей станции",
 })
 TEXT["tj"].update({
     "wizard_step": "Қадами {step} аз 7", "enter_code": "Коди стансияро ворид кунед. Мисол: 10002",
@@ -204,6 +218,17 @@ TEXT["tj"].update({
     "saved_existing_pending": "Стансияи {code} нав карда шуд. Он барои тасдиқи истеҳсолӣ интизор мемонад.",
     "saved_new_pending": "Стансия сохта шуд. Он барои тасдиқи истеҳсолӣ интизор мемонад.",
     "label_city": "Шаҳр", "label_operational_area": "Минтақа / ориентир",
+    "register_code": "Коди нави стансияро ворид кунед. Коди мавҷударо барои сохтан истифода бурдан мумкин нест.",
+    "update_code": "Коди дақиқи стансияи мавҷударо ворид кунед.",
+    "existing_create_blocked": "Стансияи {code} аллакай мавҷуд аст. Сохтан қатъ шуд.",
+    "open_existing_update": "Кушодани навсозии стансияи мавҷуда",
+    "update_fields": "Танҳо як майдонро барои тағйир интихоб кунед:",
+    "field_city": "Шаҳр", "field_district": "Ноҳия", "field_area": "Минтақа / ориентир",
+    "field_address": "Суроғаи дақиқ", "field_name": "Номи намоишӣ", "field_gps": "GPS",
+    "enter_new_value": "Арзиши навро барои «{field}» ворид кунед.",
+    "update_not_found": "Стансия бо ин коди дақиқ ёфт нашуд.",
+    "field_saved": "Танҳо майдони интихобшуда тағйир ёфт. Тасдиқ тағйир наёфт.",
+    "create_flow": "Сабти стансияи нав", "update_flow": "Навсозии стансияи мавҷуда",
 })
 TEXT["en"].update({
     "wizard_step": "Step {step} of 7", "enter_code": "Enter the station code. Example: 10002",
@@ -223,6 +248,17 @@ TEXT["en"].update({
     "saved_existing_pending": "Station {code} was updated. It remains pending production approval.",
     "saved_new_pending": "Station was created. It remains pending production approval.",
     "label_city": "City", "label_operational_area": "Operational area / landmark",
+    "register_code": "Enter a new station code. An existing code cannot be used for creation.",
+    "update_code": "Enter the exact code of an existing station.",
+    "existing_create_blocked": "Station {code} already exists. Creation has stopped.",
+    "open_existing_update": "Open existing station update",
+    "update_fields": "Select exactly one field to edit:",
+    "field_city": "City", "field_district": "District", "field_area": "Operational area",
+    "field_address": "Exact address", "field_name": "Display name", "field_gps": "GPS",
+    "enter_new_value": "Enter the new value for {field}.",
+    "update_not_found": "No station was found with that exact code.",
+    "field_saved": "Only the selected field changed. Approval status was preserved.",
+    "create_flow": "Register a new station", "update_flow": "Update an existing station",
 })
 
 

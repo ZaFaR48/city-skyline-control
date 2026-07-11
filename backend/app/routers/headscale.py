@@ -10,7 +10,15 @@ from sqlalchemy.orm import selectinload
 from ..database import get_db
 from ..deps import require_roles
 from ..models import ApprovalStatus, DeviceType, HeadscaleNode, Role, Station, User
-from ..schemas import HeadscaleApproveConfirmIn, HeadscaleApproveIn, HeadscaleLinkIn, HeadscaleNodeOut
+from ..schemas import (
+    HeadscaleApproveConfirmIn,
+    HeadscaleApproveIn,
+    HeadscaleClassificationApplyIn,
+    HeadscaleClassificationIn,
+    HeadscaleClassificationPreviewOut,
+    HeadscaleLinkIn,
+    HeadscaleNodeOut,
+)
 from ..services.audit import add_audit
 from ..services.confirmation_tokens import create_confirmation_token, verify_confirmation_token
 from ..services.headscale import sync_headscale_nodes
@@ -226,6 +234,78 @@ async def unlink_station(
     return (await _serialize_nodes(db, [node]))[0]
 
 
+@router.post("/nodes/{node_id}/classification-preview", response_model=HeadscaleClassificationPreviewOut)
+async def preview_node_classification(
+    node_id: int,
+    data: HeadscaleClassificationIn,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(Role.admin)),
+):
+    node = await _node_or_404(db, node_id)
+    preview, payload = await _classification_preview(db, node, data)
+    if preview.valid:
+        preview.preview_token = create_confirmation_token("headscale-classification", payload)
+    return preview
+
+
+@router.post("/nodes/{node_id}/classification", response_model=HeadscaleNodeOut)
+async def apply_node_classification(
+    node_id: int,
+    data: HeadscaleClassificationApplyIn,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_roles(Role.admin)),
+):
+    node = await _node_or_404(db, node_id)
+    preview, payload = await _classification_preview(db, node, data)
+    if not preview.valid:
+        raise HTTPException(422, preview.errors)
+    if data.confirmation != preview.confirmation_phrase:
+        raise HTTPException(422, "Explicit classification confirmation is required")
+    if not verify_confirmation_token(data.preview_token, "headscale-classification", payload):
+        raise HTTPException(409, "Classification preview expired or inventory changed; preview again")
+
+    before = _audit_snapshot(node)
+    station = await db.get(Station, data.station_id) if data.station_id else None
+    previous_station_id = node.station_id
+    if data.device_type == DeviceType.station:
+        assert station is not None
+        await _assert_link_available(db, node, station)
+        node.station_id = station.id
+        _sync_station_vpn_from_node(db, station, node, user, request)
+    else:
+        node.station_id = None
+    node.device_type = data.device_type.value
+
+    if before["device_type"] != node.device_type:
+        add_audit(
+            db,
+            action="headscale.reclassify",
+            entity_type="headscale_node",
+            entity_id=node.id,
+            actor=user,
+            before={"device_type": before["device_type"], "approval_status": before["approval_status"]},
+            after={"device_type": node.device_type, "approval_status": node.approval_status},
+            request=request,
+        )
+    if previous_station_id != node.station_id:
+        add_audit(
+            db,
+            action="headscale.link" if node.station_id else "headscale.unlink",
+            entity_type="headscale_node",
+            entity_id=node.id,
+            actor=user,
+            before={"station_id": previous_station_id},
+            after={"station_id": node.station_id},
+            request=request,
+        )
+    await db.commit()
+    await db.refresh(node)
+    if node.station_id:
+        await ping_station(node.station_id)
+    return (await _serialize_nodes(db, [node]))[0]
+
+
 @router.post("/sync")
 async def sync_now(_: User = Depends(require_roles(Role.admin))):
     try:
@@ -349,6 +429,72 @@ async def _approval_preview(db: AsyncSession, node: HeadscaleNode, data: Headsca
         "vpn_replacement_warning": _vpn_replacement_warning(station, node),
         "valid": not errors,
         "errors": errors,
+    }
+    return preview, payload
+
+
+async def _classification_preview(
+    db: AsyncSession,
+    node: HeadscaleNode,
+    data: HeadscaleClassificationIn,
+) -> tuple[HeadscaleClassificationPreviewOut, dict[str, object]]:
+    errors: list[str] = []
+    if node.approval_status != ApprovalStatus.approved.value:
+        errors.append("Only approved nodes can use classification editing")
+    current_station = await db.get(Station, node.station_id) if node.station_id else None
+    station = await db.get(Station, data.station_id) if data.station_id else None
+    existing_node_id = None
+    if data.device_type == DeviceType.station:
+        if not station or station.is_archived or not station.is_active:
+            errors.append("Select exactly one active station")
+        else:
+            existing_node_id = await _station_existing_node_id(db, station.id, node.id)
+            if existing_node_id:
+                errors.append("Station is already linked to another Headscale node")
+            if node.station_id not in (None, station.id):
+                errors.append("Unlink this node from its current station before selecting another station")
+    elif data.station_id is not None:
+        errors.append("Non-station device classifications cannot have a station link")
+
+    station_code = station.station_code if station else None
+    if data.device_type == DeviceType.station and station_code:
+        phrase = f"LINK NODE {node.id} TO STATION {station_code}"
+    elif node.station_id is not None:
+        phrase = f"UNLINK NODE {node.id} AND RECLASSIFY AS {data.device_type.value.upper()}"
+    else:
+        phrase = f"RECLASSIFY NODE {node.id} AS {data.device_type.value.upper()}"
+    replacement = _vpn_replacement_warning(station, node)
+    preview = HeadscaleClassificationPreviewOut(
+        node_id=node.id,
+        hostname=node.hostname,
+        vpn_ip=node.vpn_ip,
+        online=node.online,
+        approval_status=ApprovalStatus(node.approval_status),
+        current_device_type=DeviceType(node.device_type),
+        current_station_id=node.station_id,
+        current_station_code=current_station.station_code if current_station else None,
+        proposed_device_type=data.device_type,
+        proposed_station_id=data.station_id,
+        proposed_station_code=station_code,
+        station_vpn_ip=station.vpn_ip if station else None,
+        proposed_station_vpn_ip=node.vpn_ip if station and node.vpn_ip else station.vpn_ip if station else None,
+        vpn_replacement_warning=replacement,
+        confirmation_phrase=phrase,
+        valid=not errors,
+        errors=errors,
+        preview_token=None,
+    )
+    payload = {
+        "node_id": node.id,
+        "approval_status": node.approval_status,
+        "current_device_type": node.device_type,
+        "current_station_id": node.station_id,
+        "node_vpn_ip": node.vpn_ip,
+        "proposed_device_type": data.device_type.value,
+        "proposed_station_id": data.station_id,
+        "station_existing_node_id": existing_node_id,
+        "station_vpn_ip": station.vpn_ip if station else None,
+        "confirmation_phrase": phrase,
     }
     return preview, payload
 

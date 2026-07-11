@@ -238,6 +238,37 @@ class HeadscaleLinkIn(BaseModel):
     confirmation: Literal["LINK STATION"]
 
 
+class HeadscaleClassificationIn(BaseModel):
+    device_type: DeviceType
+    station_id: int | None = None
+
+
+class HeadscaleClassificationApplyIn(HeadscaleClassificationIn):
+    preview_token: str
+    confirmation: str
+
+
+class HeadscaleClassificationPreviewOut(BaseModel):
+    node_id: int
+    hostname: str
+    vpn_ip: str | None
+    online: bool
+    approval_status: ApprovalStatus
+    current_device_type: DeviceType
+    current_station_id: int | None
+    current_station_code: str | None
+    proposed_device_type: DeviceType
+    proposed_station_id: int | None
+    proposed_station_code: str | None
+    station_vpn_ip: str | None
+    proposed_station_vpn_ip: str | None
+    vpn_replacement_warning: str | None
+    confirmation_phrase: str
+    valid: bool
+    errors: list[str]
+    preview_token: str | None
+
+
 class PingPoint(ORMModel):
     latency_ms: float | None
     packet_loss: float | None
@@ -497,6 +528,51 @@ class StationRepairPreviewOut(BaseModel):
     confirmation_phrase: str
     valid: bool
     preview_token: str | None
+
+
+class StationLifecycleApplyIn(BaseModel):
+    preview_token: str
+    confirmation: str
+
+
+class StationLifecyclePreviewOut(BaseModel):
+    station_id: int
+    station_code: str
+    action: Literal["archive", "restore"]
+    warnings: list[str]
+    linked_node_id: int | None
+    active_alerts: int
+    cameras: int
+    history_records: int
+    confirmation_phrase: str
+    valid: bool
+    errors: list[str]
+    preview_token: str | None
+
+
+class SuspectedDuplicateStationOut(BaseModel):
+    station_id: int
+    station_code: str
+    name: str
+    approval_status: str
+    is_active: bool
+    is_archived: bool
+    linked_node_id: int | None
+    active_alerts: int
+    cameras: int
+    history_records: int
+
+
+class SuspectedDuplicatePairOut(BaseModel):
+    left: SuspectedDuplicateStationOut
+    right: SuspectedDuplicateStationOut
+    reasons: list[str]
+    recommendation: str
+
+
+class SuspectedDuplicateKeepBothIn(BaseModel):
+    left_station_id: int
+    right_station_id: int
 
 
 class DistrictPreviewIn(BaseModel):

@@ -1,15 +1,24 @@
 from aiogram.fsm.state import State, StatesGroup
 
 
-class AddStation(StatesGroup):
+class RegisterStation(StatesGroup):
     code = State()
-    existing_action = State()
+    existing_offer = State()
     city = State()
     district = State()
     operational_area = State()
     address = State()
-    name_choice = State()
     name = State()
+    gps = State()
+    confirm = State()
+
+
+class UpdateStation(StatesGroup):
+    code = State()
+    menu = State()
+    city = State()
+    district = State()
+    text_value = State()
     gps = State()
     confirm = State()
 

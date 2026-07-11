@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import csv
 from datetime import datetime, timezone
+from difflib import SequenceMatcher
 import io
+from math import asin, cos, radians, sin, sqrt
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
@@ -16,10 +18,13 @@ from ..models import (
     Alert,
     ApprovalStatus,
     DeviceType,
+    Camera,
     HeadscaleNode,
     OperationalRegion,
+    PingHistory,
     Role,
     Station,
+    StationStatusEvent,
     User,
 )
 from ..schemas import (
@@ -44,6 +49,11 @@ from ..schemas import (
     StationRepairChangeOut,
     StationRepairIn,
     StationRepairPreviewOut,
+    StationLifecycleApplyIn,
+    StationLifecyclePreviewOut,
+    SuspectedDuplicatePairOut,
+    SuspectedDuplicateStationOut,
+    SuspectedDuplicateKeepBothIn,
 )
 from ..services.audit import add_audit
 from ..services.confirmation_tokens import create_confirmation_token, verify_confirmation_token
@@ -242,6 +252,124 @@ async def apply_station_repair(
     await db.commit()
     station = await _onboarding_station(db, station_id)
     return (await serialize_stations(db, [station]))[0]
+
+
+@router.get("/station-inventory", response_model=list[StationOut])
+async def station_inventory(
+    view: str = "all",
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(Role.admin)),
+):
+    allowed = {"all", "pending", "approved", "archived", "missing_headscale", "suspected_duplicate", "data_quality"}
+    if view not in allowed:
+        raise HTTPException(422, "Unknown station inventory filter")
+    stations = list((await db.execute(
+        select(Station)
+        .join(OperationalRegion, Station.city_id == OperationalRegion.id)
+        .where(OperationalRegion.code == "dushanbe")
+        .options(selectinload(Station.city), selectinload(Station.district))
+        .order_by(Station.station_code)
+    )).scalars().all())
+    rows = await serialize_stations(db, stations)
+    duplicate_ids = await _suspected_duplicate_ids(db, stations) if view == "suspected_duplicate" else set()
+    if view == "pending":
+        rows = [row for row in rows if row.approved_at is None and not row.is_archived]
+    elif view == "approved":
+        rows = [row for row in rows if row.approved_at is not None and not row.is_archived]
+    elif view == "archived":
+        rows = [row for row in rows if row.is_archived]
+    elif view == "missing_headscale":
+        rows = [row for row in rows if not row.headscale_linked and not row.is_archived]
+    elif view == "suspected_duplicate":
+        rows = [row for row in rows if row.id in duplicate_ids]
+    elif view == "data_quality":
+        rows = [row for row in rows if row.data_quality_warnings]
+    return rows
+
+
+@router.post("/stations/{station_id}/archive-preview", response_model=StationLifecyclePreviewOut)
+async def preview_station_archive(
+    station_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(Role.admin)),
+):
+    station = await _inventory_station(db, station_id)
+    return await _station_lifecycle_preview(db, station, "archive")
+
+
+@router.post("/stations/{station_id}/restore-preview", response_model=StationLifecyclePreviewOut)
+async def preview_station_restore(
+    station_id: int,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(Role.admin)),
+):
+    station = await _inventory_station(db, station_id)
+    return await _station_lifecycle_preview(db, station, "restore")
+
+
+@router.post("/stations/{station_id}/archive", response_model=StationOut)
+async def archive_inventory_station(
+    station_id: int,
+    data: StationLifecycleApplyIn,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_roles(Role.admin)),
+):
+    return await _apply_station_lifecycle(db, station_id, data, "archive", request, user)
+
+
+@router.post("/stations/{station_id}/restore", response_model=StationOut)
+async def restore_inventory_station(
+    station_id: int,
+    data: StationLifecycleApplyIn,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_roles(Role.admin)),
+):
+    return await _apply_station_lifecycle(db, station_id, data, "restore", request, user)
+
+
+@router.get("/suspected-duplicates", response_model=list[SuspectedDuplicatePairOut])
+async def suspected_duplicate_report(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(Role.admin)),
+):
+    stations = list((await db.execute(
+        select(Station)
+        .join(OperationalRegion, Station.city_id == OperationalRegion.id)
+        .where(OperationalRegion.code == "dushanbe", Station.is_archived.is_(False))
+        .order_by(Station.station_code)
+    )).scalars().all())
+    return await _suspected_duplicate_pairs(db, stations)
+
+
+@router.post("/suspected-duplicates/keep-both")
+async def keep_both_suspected_duplicates(
+    data: SuspectedDuplicateKeepBothIn,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_roles(Role.admin)),
+):
+    if data.left_station_id == data.right_station_id:
+        raise HTTPException(422, "Select two different stations")
+    stations = list((await db.execute(select(Station).where(Station.id.in_([data.left_station_id, data.right_station_id])))).scalars().all())
+    if len(stations) != 2:
+        raise HTTPException(404, "Station pair not found")
+    reasons = _duplicate_reasons(stations[0], stations[1])
+    if not reasons:
+        raise HTTPException(409, "This pair is no longer in the suspected duplicate report")
+    add_audit(
+        db,
+        action="station.duplicate_keep_both",
+        entity_type="station_pair",
+        entity_id=f"{min(data.left_station_id, data.right_station_id)}:{max(data.left_station_id, data.right_station_id)}",
+        actor=user,
+        before={"reasons": reasons},
+        after={"decision": "keep_both", "changed": False},
+        request=request,
+    )
+    await db.commit()
+    return {"status": "recorded", "changed": False}
 
 
 @router.get("/districts/stations", response_model=list[StationOut])
@@ -797,6 +925,198 @@ def _station_repair_payload(station: Station, preview: StationRepairPreviewOut) 
         "station_code": station.station_code,
         "changes": [item.model_dump() for item in preview.changes],
     }
+
+
+async def _inventory_station(db: AsyncSession, station_id: int) -> Station:
+    station = (
+        await db.execute(
+            select(Station)
+            .where(Station.id == station_id)
+            .options(selectinload(Station.city), selectinload(Station.district))
+        )
+    ).scalar_one_or_none()
+    if not station or not station.city or station.city.code != "dushanbe":
+        raise HTTPException(404, "Dushanbe station not found")
+    return station
+
+
+async def _station_lifecycle_preview(
+    db: AsyncSession,
+    station: Station,
+    action: str,
+) -> StationLifecyclePreviewOut:
+    node_id = await db.scalar(select(HeadscaleNode.id).where(HeadscaleNode.station_id == station.id))
+    active_alerts = int(await db.scalar(select(func.count()).select_from(Alert).where(Alert.station_id == station.id, Alert.resolved_at.is_(None))) or 0)
+    cameras = int(await db.scalar(select(func.count()).select_from(Camera).where(Camera.station_id == station.id)) or 0)
+    ping_count = int(await db.scalar(select(func.count()).select_from(PingHistory).where(PingHistory.station_id == station.id)) or 0)
+    event_count = int(await db.scalar(select(func.count()).select_from(StationStatusEvent).where(StationStatusEvent.station_id == station.id)) or 0)
+    history_records = ping_count + event_count
+    errors = []
+    if action == "archive" and station.is_archived:
+        errors.append("Station is already archived")
+    if action == "restore" and not station.is_archived:
+        errors.append("Station is not archived")
+    warnings = []
+    if node_id:
+        warnings.append("A Headscale node is linked; archiving does not unlink it")
+    if active_alerts:
+        warnings.append(f"Station has {active_alerts} active alert(s)")
+    if cameras:
+        warnings.append(f"Station has {cameras} camera record(s)")
+    if history_records:
+        warnings.append(f"Station has {history_records} monitoring/history record(s)")
+    phrase = f"{action.upper()} STATION {station.station_code}"
+    payload = {
+        "station_id": station.id,
+        "station_code": station.station_code,
+        "action": action,
+        "is_active": station.is_active,
+        "is_archived": station.is_archived,
+        "linked_node_id": node_id,
+        "active_alerts": active_alerts,
+        "cameras": cameras,
+        "history_records": history_records,
+    }
+    preview = StationLifecyclePreviewOut(
+        station_id=station.id,
+        station_code=station.station_code,
+        action=action,
+        warnings=warnings,
+        linked_node_id=node_id,
+        active_alerts=active_alerts,
+        cameras=cameras,
+        history_records=history_records,
+        confirmation_phrase=phrase,
+        valid=not errors,
+        errors=errors,
+        preview_token=None,
+    )
+    if preview.valid:
+        preview.preview_token = create_confirmation_token("station-lifecycle", payload)
+    return preview
+
+
+async def _apply_station_lifecycle(
+    db: AsyncSession,
+    station_id: int,
+    data: StationLifecycleApplyIn,
+    action: str,
+    request: Request,
+    user: User,
+) -> StationOut:
+    station = await _inventory_station(db, station_id)
+    preview = await _station_lifecycle_preview(db, station, action)
+    if not preview.valid or not preview.preview_token:
+        raise HTTPException(422, preview.errors)
+    if data.confirmation != preview.confirmation_phrase:
+        raise HTTPException(422, "Explicit station lifecycle confirmation is required")
+    payload = {
+        "station_id": station.id,
+        "station_code": station.station_code,
+        "action": action,
+        "is_active": station.is_active,
+        "is_archived": station.is_archived,
+        "linked_node_id": preview.linked_node_id,
+        "active_alerts": preview.active_alerts,
+        "cameras": preview.cameras,
+        "history_records": preview.history_records,
+    }
+    if not verify_confirmation_token(data.preview_token, "station-lifecycle", payload):
+        raise HTTPException(409, "Lifecycle preview expired or inventory changed; preview again")
+    before = {"is_active": station.is_active, "is_archived": station.is_archived}
+    station.is_archived = action == "archive"
+    station.is_active = action == "restore"
+    add_audit(
+        db,
+        action=f"station.{action}",
+        entity_type="station",
+        entity_id=station.id,
+        actor=user,
+        before=before,
+        after={"is_active": station.is_active, "is_archived": station.is_archived},
+        request=request,
+    )
+    await db.commit()
+    station = await _inventory_station(db, station_id)
+    return (await serialize_stations(db, [station]))[0]
+
+
+def _normalized(value: str | None) -> str:
+    return " ".join((value or "").casefold().replace(".", " ").replace(",", " ").split())
+
+
+def _distance_m(left: Station, right: Station) -> float | None:
+    if None in (left.latitude, left.longitude, right.latitude, right.longitude):
+        return None
+    lat1, lon1, lat2, lon2 = map(radians, (left.latitude, left.longitude, right.latitude, right.longitude))
+    dlat, dlon = lat2 - lat1, lon2 - lon1
+    value = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+    return 6_371_000 * 2 * asin(sqrt(value))
+
+
+def _duplicate_reasons(left: Station, right: Station) -> list[str]:
+    reasons = []
+    left_name, right_name = _normalized(left.name), _normalized(right.name)
+    if left_name and right_name:
+        similarity = SequenceMatcher(None, left_name, right_name).ratio()
+        if left_name == right_name:
+            reasons.append("same normalized name")
+        elif similarity >= 0.82:
+            reasons.append(f"similar name ({similarity:.0%})")
+    distance = _distance_m(left, right)
+    if distance is not None and distance <= 50:
+        reasons.append(f"coordinates within {distance:.0f} m")
+    if _normalized(left.address) and _normalized(left.address) == _normalized(right.address):
+        reasons.append("same address")
+    if left.vpn_ip and left.vpn_ip == right.vpn_ip:
+        reasons.append("same VPN IP")
+    if _normalized(left.operational_area) and _normalized(left.operational_area) == _normalized(right.operational_area):
+        reasons.append("same operational area")
+    return reasons
+
+
+async def _suspected_duplicate_ids(db: AsyncSession, stations: list[Station]) -> set[int]:
+    pairs = await _suspected_duplicate_pairs(db, stations)
+    return {item.left.station_id for item in pairs} | {item.right.station_id for item in pairs}
+
+
+async def _suspected_duplicate_pairs(db: AsyncSession, stations: list[Station]) -> list[SuspectedDuplicatePairOut]:
+    station_ids = [station.id for station in stations]
+    nodes = list((await db.execute(select(HeadscaleNode).where(HeadscaleNode.station_id.in_(station_ids)))).scalars().all()) if station_ids else []
+    node_by_station = {node.station_id: node.id for node in nodes}
+    alert_counts = dict((await db.execute(select(Alert.station_id, func.count()).where(Alert.station_id.in_(station_ids), Alert.resolved_at.is_(None)).group_by(Alert.station_id))).all()) if station_ids else {}
+    camera_counts = dict((await db.execute(select(Camera.station_id, func.count()).where(Camera.station_id.in_(station_ids)).group_by(Camera.station_id))).all()) if station_ids else {}
+    ping_counts = dict((await db.execute(select(PingHistory.station_id, func.count()).where(PingHistory.station_id.in_(station_ids)).group_by(PingHistory.station_id))).all()) if station_ids else {}
+    event_counts = dict((await db.execute(select(StationStatusEvent.station_id, func.count()).where(StationStatusEvent.station_id.in_(station_ids)).group_by(StationStatusEvent.station_id))).all()) if station_ids else {}
+
+    def row(station: Station) -> SuspectedDuplicateStationOut:
+        return SuspectedDuplicateStationOut(
+            station_id=station.id,
+            station_code=station.station_code,
+            name=station.name,
+            approval_status="approved" if station.approved_at else "pending",
+            is_active=station.is_active,
+            is_archived=station.is_archived,
+            linked_node_id=node_by_station.get(station.id),
+            active_alerts=int(alert_counts.get(station.id, 0)),
+            cameras=int(camera_counts.get(station.id, 0)),
+            history_records=int(ping_counts.get(station.id, 0)) + int(event_counts.get(station.id, 0)),
+        )
+
+    output = []
+    for index, left in enumerate(stations):
+        for right in stations[index + 1:]:
+            if left.station_code == right.station_code:
+                continue
+            reasons = _duplicate_reasons(left, right)
+            if reasons:
+                output.append(SuspectedDuplicatePairOut(
+                    left=row(left),
+                    right=row(right),
+                    reasons=reasons,
+                    recommendation="Review both records. Keep both when they represent distinct physical sites; otherwise repair or explicitly archive only the obsolete record.",
+                ))
+    return output
 
 
 async def _district_preview(db: AsyncSession, assignments: list[DistrictAssignmentIn]) -> DistrictPreviewOut:

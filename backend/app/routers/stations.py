@@ -253,11 +253,11 @@ async def archive_station(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_roles(Role.admin)),
 ):
-    station = await _load_station(db, station_id)
-    station.is_archived = True
-    station.is_active = False
-    add_audit(db, action="station.archive", entity_type="station", entity_id=station.id, actor=user, before={"is_archived": False}, after={"is_archived": True}, request=request)
-    await db.commit()
+    await _load_station(db, station_id)
+    raise HTTPException(
+        409,
+        "Use the Onboarding station inventory archive preview and typed confirmation workflow",
+    )
 
 
 @router.post("/{station_id}/check", status_code=202)

@@ -14,7 +14,8 @@ def language_keyboard() -> ReplyKeyboardMarkup:
 
 def main_keyboard(lang: str = "tj", is_admin: bool = False) -> ReplyKeyboardMarkup:
     rows = [
-        ["new_station", "search_station"],
+        ["register_station", "update_station"],
+        ["search_station"],
         ["scan_qr", "rustdesk"],
         ["vpn", "ping"],
         ["camera", "network_status"],
