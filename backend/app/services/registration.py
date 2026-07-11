@@ -33,7 +33,7 @@ async def create_activation(
         username = await _unique_username(db, registration)
         user = User(
             username=username,
-            email=f"{username}@telegram.invalid",
+            email=f"{username}@telegram.cityparking.tj",
             hashed_password="!activation-required!",
             role=registration.assigned_role or "viewer",
             is_active=False,
