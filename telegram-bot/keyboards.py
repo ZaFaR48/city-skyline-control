@@ -16,7 +16,7 @@ def main_keyboard(lang: str = "tj", is_admin: bool = False, role: str | None = N
     current_role = role or ("admin" if is_admin else "viewer")
     read_only = [
         ["search_station"], ["station_summary"], ["district_stations"],
-        ["station_status"], ["alerts"], ["my_access"],
+        ["station_status"], ["alerts"], ["my_access"], ["change_language"],
     ]
     if current_role == "operator":
         rows = [["register_station"], ["update_station"], *read_only]
@@ -25,7 +25,8 @@ def main_keyboard(lang: str = "tj", is_admin: bool = False, role: str | None = N
             ["register_station", "update_station"], ["search_station", "station_summary"],
             ["district_stations", "station_status"], ["scan_qr", "rustdesk"], ["vpn", "ping"],
             ["camera", "network_status"], ["alerts", "reports"], ["settings"], ["pending_users"],
-            ["my_access", "request_access"], ["help_access"],
+            ["summary_enable", "summary_disable"], ["summary_status"],
+            ["my_access", "change_language"], ["request_access", "help_access"],
         ]
     else:
         rows = read_only
@@ -38,15 +39,15 @@ def main_keyboard(lang: str = "tj", is_admin: bool = False, role: str | None = N
     )
 
 
-def registration_review_keyboard(registration_id: int) -> InlineKeyboardMarkup:
+def registration_review_keyboard(registration_id: int, lang: str = "tj") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="Approve ADMIN", callback_data=f"reg:approve:{registration_id}:admin"),
-            InlineKeyboardButton(text="Approve OPERATOR", callback_data=f"reg:approve:{registration_id}:operator"),
+            InlineKeyboardButton(text=t(lang, "approve_admin"), callback_data=f"reg:approve:{registration_id}:admin"),
+            InlineKeyboardButton(text=t(lang, "approve_operator"), callback_data=f"reg:approve:{registration_id}:operator"),
         ],
         [
-            InlineKeyboardButton(text="Approve VIEWER", callback_data=f"reg:approve:{registration_id}:viewer"),
-            InlineKeyboardButton(text="Reject", callback_data=f"reg:reject:{registration_id}:none"),
+            InlineKeyboardButton(text=t(lang, "approve_viewer"), callback_data=f"reg:approve:{registration_id}:viewer"),
+            InlineKeyboardButton(text=t(lang, "reject_access"), callback_data=f"reg:reject:{registration_id}:none"),
         ],
     ])
 

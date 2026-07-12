@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
@@ -32,6 +33,7 @@ from ..schemas import (
     TelegramLinkApplyIn,
     TelegramLinkPreviewIn,
     TelegramLinkPreviewOut,
+    TelegramLanguageIn,
 )
 from ..security import hash_password
 from ..services.audit import add_audit
@@ -62,6 +64,7 @@ async def telegram_start(
             role=user.role if user else None,
             is_active=user.is_active if user else None,
             activation_required=bool(user and not user.is_active),
+            preferred_language=identity.preferred_language,
         )
 
     registration = (
@@ -78,7 +81,7 @@ async def telegram_start(
         )
         db.add(registration)
         await db.commit()
-        return RegistrationStatusOut(status=RegistrationStatus.pending)
+        return RegistrationStatusOut(status=RegistrationStatus.pending, preferred_language=registration.preferred_language)
 
     registration.telegram_username = data.telegram_username
     registration.first_name = data.first_name
@@ -103,6 +106,7 @@ async def telegram_start(
             activation_code=code,
             activation_url=f"{settings.PUBLIC_WEB_URL}/activate?code={code}",
             expires_at=expires_at,
+            preferred_language=registration.preferred_language,
         )
     linked_user = await db.get(User, registration.user_id) if registration.user_id else None
     await db.commit()
@@ -112,7 +116,43 @@ async def telegram_start(
         role=linked_user.role if linked_user else registration.assigned_role,
         is_active=linked_user.is_active if linked_user else None,
         activation_required=bool(linked_user and not linked_user.is_active),
+        preferred_language=registration.preferred_language,
     )
+
+
+@router.post("/telegram/language")
+async def set_telegram_language(
+    data: TelegramLanguageIn,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(Role.admin)),
+):
+    identity = (
+        await db.execute(select(TelegramIdentity).where(TelegramIdentity.telegram_user_id == data.telegram_user_id))
+    ).scalar_one_or_none()
+    registration = (
+        await db.execute(select(UserRegistrationRequest).where(UserRegistrationRequest.telegram_user_id == data.telegram_user_id))
+    ).scalar_one_or_none()
+    if identity:
+        identity.preferred_language = data.language
+    if registration:
+        registration.preferred_language = data.language
+    if not identity and not registration:
+        registration = UserRegistrationRequest(
+            telegram_user_id=data.telegram_user_id,
+            telegram_username=data.telegram_username,
+            preferred_language=data.language,
+            status=RegistrationStatus.pending.value,
+        )
+        db.add(registration)
+    await db.commit()
+    logging.getLogger(__name__).info(
+        "telegram_language_selected telegram_user_id=%s language=%s identity=%s registration=%s",
+        data.telegram_user_id,
+        data.language,
+        bool(identity),
+        bool(registration),
+    )
+    return {"preferred_language": data.language}
 
 
 @router.get("", response_model=list[RegistrationOut])
@@ -164,6 +204,7 @@ async def link_registration_to_existing_user(
             telegram_username=registration.telegram_username,
             first_name=registration.first_name,
             last_name=registration.last_name,
+            preferred_language=registration.preferred_language,
         )
     )
     registration.user_id = preview.user_id
@@ -194,7 +235,7 @@ async def link_registration_to_existing_user(
     try:
         notification_sent = await send_telegram_to(
             registration.telegram_user_id,
-            "Your Telegram account is now linked to City Parking.",
+            _registration_message(registration.preferred_language, "linked"),
         )
     except Exception:
         notification_sent = False
@@ -245,9 +286,13 @@ async def initiate_password_reset(
     try:
         notification_sent = await send_telegram_to(
             registration.telegram_user_id,
-            f"City Parking password reset requested.\nUsername: {user.username}\n"
-            f"Role: {user.role}\nReset link: {settings.PUBLIC_WEB_URL}/activate?code={code}\n"
-            "Use this exact username on the login page. This single-use link expires soon.",
+            _registration_message(
+                registration.preferred_language,
+                "password_reset",
+                username=user.username,
+                role=user.role,
+                url=f"{settings.PUBLIC_WEB_URL}/activate?code={code}",
+            ),
         )
     except Exception:
         notification_sent = False
@@ -312,12 +357,12 @@ async def review_registration(
     if data.action == "reject":
         registration.status = RegistrationStatus.rejected.value
         action = "registration.reject"
-        result = RegistrationStatusOut(status=RegistrationStatus.rejected)
+        result = RegistrationStatusOut(status=RegistrationStatus.rejected, preferred_language=registration.preferred_language)
     elif data.action == "clarification":
         registration.status = RegistrationStatus.clarification_requested.value
         registration.clarification = data.clarification
         action = "registration.clarification"
-        result = RegistrationStatusOut(status=RegistrationStatus.clarification_requested)
+        result = RegistrationStatusOut(status=RegistrationStatus.clarification_requested, preferred_language=registration.preferred_language)
     else:
         if data.role is None:
             raise HTTPException(422, "role is required when approving")
@@ -333,6 +378,7 @@ async def review_registration(
             activation_code=code,
             activation_url=f"{settings.PUBLIC_WEB_URL}/activate?code={code}",
             expires_at=expires_at,
+            preferred_language=registration.preferred_language,
         )
 
     add_audit(db, action=action, entity_type="user_registration_request", entity_id=registration.id, actor=actor, before=before, after={"status": registration.status, "assigned_role": registration.assigned_role}, request=request)
@@ -340,13 +386,49 @@ async def review_registration(
     if data.action == "approve" and result.activation_code:
         await send_telegram_to(
             registration.telegram_user_id,
-            f"City Parking access approved.\nUsername: {result.username}\n"
-            f"Role: {result.role.value if result.role else 'viewer'}\n"
-            f"Activation: {settings.PUBLIC_WEB_URL}/activate?code={result.activation_code}\n"
-            "Use this exact username on the login page after activation.\n"
-            f"This single-use link expires in {settings.ACTIVATION_TOKEN_TTL_MINUTES} minutes.",
+            _registration_message(
+                registration.preferred_language,
+                "approved",
+                username=result.username or "—",
+                role=result.role.value if result.role else "viewer",
+                url=f"{settings.PUBLIC_WEB_URL}/activate?code={result.activation_code}",
+                minutes=settings.ACTIVATION_TOKEN_TTL_MINUTES,
+            ),
+        )
+    elif data.action in {"reject", "clarification"}:
+        await send_telegram_to(
+            registration.telegram_user_id,
+            _registration_message(registration.preferred_language, data.action),
         )
     return result
+
+
+def _registration_message(language: str, key: str, **values: object) -> str:
+    messages = {
+        "tj": {
+            "linked": "Ҳисоби Telegram-и шумо ба City Parking пайваст шуд.",
+            "password_reset": "Барқарорсозии рамзи City Parking дархост шуд.\nНоми корбар: {username}\nНақш: {role}\nПайванд: {url}\nПайванд якдафъаина аст ва ба зудӣ муҳлаташ ба охир мерасад.",
+            "approved": "Дастрасии City Parking тасдиқ шуд.\nНоми корбар: {username}\nНақш: {role}\nФаъолсозӣ: {url}\nПайванд якдафъаина аст ва пас аз {minutes} дақиқа ба охир мерасад.",
+            "reject": "Дархости дастрасии шумо рад шуд. Ба администратори City Parking муроҷиат кунед.",
+            "clarification": "Администратор шарҳи иловагӣ дархост кард. Ба дастгирии City Parking муроҷиат кунед.",
+        },
+        "ru": {
+            "linked": "Ваша учётная запись Telegram связана с City Parking.",
+            "password_reset": "Запрошен сброс пароля City Parking.\nИмя пользователя: {username}\nРоль: {role}\nСсылка: {url}\nСсылка одноразовая и скоро истечёт.",
+            "approved": "Доступ City Parking одобрен.\nИмя пользователя: {username}\nРоль: {role}\nАктивация: {url}\nОдноразовая ссылка истечёт через {minutes} мин.",
+            "reject": "Ваш запрос доступа отклонён. Обратитесь к администратору City Parking.",
+            "clarification": "Администратор запросил уточнение. Обратитесь в поддержку City Parking.",
+        },
+        "en": {
+            "linked": "Your Telegram account is now linked to City Parking.",
+            "password_reset": "City Parking password reset requested.\nUsername: {username}\nRole: {role}\nLink: {url}\nThis single-use link expires soon.",
+            "approved": "City Parking access approved.\nUsername: {username}\nRole: {role}\nActivation: {url}\nThis single-use link expires in {minutes} minutes.",
+            "reject": "Your access request was rejected. Contact a City Parking administrator.",
+            "clarification": "The administrator requested clarification. Contact City Parking support.",
+        },
+    }
+    selected = language if language in messages else "tj"
+    return messages[selected][key].format(**values)
 
 
 @router.post("/activate", response_model=ActivationOut)

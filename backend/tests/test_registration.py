@@ -13,9 +13,10 @@ from app.routers.registrations import (
     link_registration_to_existing_user,
     preview_password_reset,
     preview_existing_user_link,
+    set_telegram_language,
     telegram_start,
 )
-from app.schemas import ActivationIn, PasswordResetApplyIn, RegistrationUpsertIn, TelegramLinkApplyIn, TelegramLinkPreviewIn
+from app.schemas import ActivationIn, PasswordResetApplyIn, RegistrationUpsertIn, TelegramLanguageIn, TelegramLinkApplyIn, TelegramLinkPreviewIn
 from app.routers.auth import login
 from app.schemas import LoginIn
 from app.security import hash_password
@@ -81,6 +82,25 @@ async def test_rejected_user_cannot_register(db):
     await db.commit()
     result = await telegram_start(RegistrationUpsertIn(telegram_user_id=700005), db, admin())
     assert result.status == RegistrationStatus.rejected
+
+
+@pytest.mark.asyncio
+async def test_language_preference_persists_for_pending_and_activated_users(db):
+    pending_id = 700006
+    await set_telegram_language(TelegramLanguageIn(telegram_user_id=pending_id, language="ru"), db, admin())
+    pending = await telegram_start(RegistrationUpsertIn(telegram_user_id=pending_id), db, admin())
+    assert pending.preferred_language == "ru"
+
+    user = User(username="language-user", email="language-user@test.invalid", hashed_password="x", role="operator", is_active=True)
+    db.add(user)
+    await db.flush()
+    identity = TelegramIdentity(user_id=user.id, telegram_user_id=700007, preferred_language="tj")
+    db.add(identity)
+    await db.flush()
+    await set_telegram_language(TelegramLanguageIn(telegram_user_id=700007, language="en"), db, admin())
+    db.expire_all()
+    activated = await telegram_start(RegistrationUpsertIn(telegram_user_id=700007), db, admin())
+    assert activated.preferred_language == "en"
 
 
 @pytest.mark.asyncio

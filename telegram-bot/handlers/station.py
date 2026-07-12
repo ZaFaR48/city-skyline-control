@@ -12,7 +12,7 @@ from aiogram.types import CallbackQuery, Message
 
 from api import BackendAPIError, api
 from authorization import require_telegram_roles
-from i18n import all_menu_labels, all_texts, t
+from i18n import all_menu_labels, all_texts, localized_error, t
 from keyboards import location_keyboard, main_keyboard, navigation_keyboard, wizard_inline
 from states import RegisterStation, UpdateStation
 from validators import clean_text, is_valid_station_code, normalize_station_code
@@ -142,7 +142,7 @@ async def register_start(message: Message, state: FSMContext) -> None:
         )
     except BackendAPIError as exc:
         await state.clear()
-        await message.answer(f"{t(lang, 'api_error')} {exc.message}")
+        await message.answer(localized_error(lang, exc.message))
         return
     await _prompt(message, state, t(lang, "register_code"), reply_markup=navigation_keyboard(lang))
 
@@ -166,7 +166,7 @@ async def update_start(message: Message, state: FSMContext) -> None:
         )
     except BackendAPIError as exc:
         await state.clear()
-        await message.answer(f"{t(lang, 'api_error')} {exc.message}")
+        await message.answer(localized_error(lang, exc.message))
         return
     await _prompt(message, state, t(lang, "update_code"), reply_markup=navigation_keyboard(lang))
 
@@ -185,7 +185,7 @@ async def register_code(message: Message, state: FSMContext) -> None:
         try:
             existing = await api.station_by_code(code)
         except BackendAPIError as exc:
-            await message.answer(f"{t(lang, 'api_error')} {exc.message}")
+            await message.answer(localized_error(lang, exc.message))
             return
         await state.update_data(code=code)
         await _track(state, "telegram.station_field.changed", "station_code", station_code=code, changed_fields=["station_code"], after_data={"station_code": code})
@@ -220,7 +220,7 @@ async def update_code(message: Message, state: FSMContext) -> None:
         try:
             existing = await api.station_by_code(code)
         except BackendAPIError as exc:
-            await message.answer(f"{t(lang, 'api_error')} {exc.message}")
+            await message.answer(localized_error(lang, exc.message))
             return
         if not existing:
             await _track(state, "telegram.validation_failed", "station_code", failure_reason="station not found")
@@ -309,7 +309,7 @@ async def _show_create_city(message: Message, state: FSMContext, lang: str) -> N
     await _prompt(
         message,
         state,
-        "Step 2/7 — " + t(lang, "select_city"),
+        f"{t(lang, 'wizard_step').format(step=2)} — {t(lang, 'select_city')}",
         reply_markup=wizard_inline([
             [(t(lang, "city_dushanbe"), _cb(data, "create_city", "dushanbe"))],
             [(t(lang, "back"), _cb(data, "create_city", "back")), (t(lang, "cancel"), _cb(data, "cancel"))],
@@ -321,12 +321,12 @@ async def _show_create_district(message: Message, state: FSMContext, lang: str) 
     data = await _advance(state, RegisterStation.district)
     rows = [[(DISTRICT_LABELS[lang][code], _cb(data, "create_district", code))] for code in DISTRICTS]
     rows.append([(t(lang, "back"), _cb(data, "create_district", "back")), (t(lang, "cancel"), _cb(data, "cancel"))])
-    await _prompt(message, state, "Step 3/7 — " + t(lang, "select_district"), reply_markup=wizard_inline(rows))
+    await _prompt(message, state, f"{t(lang, 'wizard_step').format(step=3)} — {t(lang, 'select_district')}", reply_markup=wizard_inline(rows))
 
 
 async def _prompt_create_text(message: Message, state: FSMContext, lang: str, target, step: int, key: str, *, allow_skip: bool = False) -> None:
     await _advance(state, target)
-    await _prompt(message, state, f"Step {step}/7 — {t(lang, key)}", reply_markup=navigation_keyboard(lang, allow_skip=allow_skip))
+    await _prompt(message, state, f"{t(lang, 'wizard_step').format(step=step)} — {t(lang, key)}", reply_markup=navigation_keyboard(lang, allow_skip=allow_skip))
 
 
 @router.message(RegisterStation.operational_area)
@@ -381,7 +381,7 @@ async def register_name(message: Message, state: FSMContext) -> None:
 
 async def _prompt_create_gps(message: Message, state: FSMContext, lang: str) -> None:
     await _advance(state, RegisterStation.gps)
-    await _prompt(message, state, "Step 7/7 — " + t(lang, "gps_prompt"), reply_markup=location_keyboard(lang))
+    await _prompt(message, state, f"{t(lang, 'wizard_step').format(step=7)} — {t(lang, 'gps_prompt')}", reply_markup=location_keyboard(lang))
 
 
 @router.message(RegisterStation.gps)
@@ -479,7 +479,7 @@ async def _prepare_region_patch(message: Message, state: FSMContext, lang: str, 
     try:
         regions = await api.regions()
     except BackendAPIError as exc:
-        await message.answer(f"{t(lang, 'api_error')} {exc.message}")
+        await message.answer(localized_error(lang, exc.message))
         return
     code = city_code or district_code
     region = next((item for item in regions if item.get("code") == code), None)
@@ -529,7 +529,7 @@ async def _save_update(callback: CallbackQuery, state: FSMContext, lang: str) ->
     try:
         current = await api.station_by_code(data["code"])
         if not current or current.get("id") != data["existing_station_id"]:
-            raise BackendAPIError("Station changed; restart the update", 409)
+            raise BackendAPIError(t(lang, "station_changed_restart"), 409)
         patch = {field: value for field, value in (data.get("patch") or {}).items() if current.get(field) != value}
         if patch:
             await _track(state, "telegram.station_save.confirmed", "save", station_id=current["id"], station_code=data["code"], changed_fields=list(patch))
@@ -539,7 +539,7 @@ async def _save_update(callback: CallbackQuery, state: FSMContext, lang: str) ->
     except BackendAPIError as exc:
         await _track(state, "telegram.validation_failed", "save", failure_reason=exc.message)
         await state.update_data(saving=False)
-        await callback.answer(exc.message, show_alert=True)
+        await callback.answer(localized_error(lang, exc.message), show_alert=True)
         return
     await _finish(state)
     await callback.message.answer(t(lang, "field_saved"), reply_markup=main_keyboard(lang, role=role))
@@ -559,12 +559,12 @@ async def _save_create(callback: CallbackQuery, state: FSMContext, lang: str) ->
         return
     try:
         if await api.station_by_code(data["code"]):
-            raise BackendAPIError("Station code already exists; creation stopped", 409)
+            raise BackendAPIError(t(lang, "station_code_conflict"), 409)
         regions = await api.regions()
         city = next((item for item in regions if item.get("code") == data["city_code"]), None)
         district = next((item for item in regions if item.get("code") == data["district_code"]), None)
         if not city or not district:
-            raise BackendAPIError("Canonical region data is unavailable", 409)
+            raise BackendAPIError(t(lang, "canonical_region_unavailable"), 409)
         await _track(state, "telegram.station_save.confirmed", "save", station_code=data["code"])
         await api.create_station_as_telegram_user(
             callback.from_user,
@@ -574,7 +574,7 @@ async def _save_create(callback: CallbackQuery, state: FSMContext, lang: str) ->
     except BackendAPIError as exc:
         await _track(state, "telegram.validation_failed", "save", failure_reason=exc.message)
         await state.update_data(saving=False)
-        await callback.answer(exc.message, show_alert=True)
+        await callback.answer(localized_error(lang, exc.message), show_alert=True)
         return
     await _finish(state)
     await callback.message.answer(t(lang, "registered_pending").format(code=data["code"]), reply_markup=main_keyboard(lang, role=role))

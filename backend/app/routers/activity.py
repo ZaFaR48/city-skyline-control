@@ -3,11 +3,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import String, cast, or_, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from ..config import settings
 from ..database import get_db
 from ..deps import get_current_user, require_roles
 from ..models import (
@@ -17,6 +18,7 @@ from ..models import (
     Station,
     TelegramIdentity,
     TelegramStationWorkflow,
+    TelegramSummarySetting,
     User,
 )
 from ..schemas import (
@@ -28,6 +30,8 @@ from ..schemas import (
     TelegramRoleOut,
     TelegramStationCreateIn,
     TelegramStationUpdateIn,
+    TelegramSummaryControlIn,
+    TelegramSummaryControlOut,
     TelegramWorkflowEventIn,
     TelegramWorkflowStartIn,
 )
@@ -40,6 +44,7 @@ from ..services.operator_activity import (
     touch_presence,
 )
 from ..services.station_views import serialize_stations
+from ..services.operations_summary import snapshot_summary_cursor
 
 
 router = APIRouter()
@@ -74,7 +79,78 @@ async def telegram_resolve(
     identity.telegram_username = data.telegram_username or identity.telegram_username
     await touch_presence(db, user, "telegram")
     await db.commit()
-    return TelegramRoleOut(user_id=user.id, username=user.username, role=user.role, is_active=user.is_active)
+    return TelegramRoleOut(user_id=user.id, username=user.username, role=user.role, is_active=user.is_active, preferred_language=identity.preferred_language)
+
+
+@router.post("/telegram/summary-control", response_model=TelegramSummaryControlOut)
+async def telegram_summary_control(
+    data: TelegramSummaryControlIn,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(Role.admin)),
+):
+    user, identity = await _require_telegram_actor(db, data, {Role.admin.value})
+    setting = await db.get(TelegramSummarySetting, 1)
+    if setting is None:
+        setting = TelegramSummarySetting(id=1, enabled=True, interval_minutes=settings.TELEGRAM_SUMMARY_INTERVAL_MINUTES)
+        db.add(setting)
+        await db.flush()
+    setting.interval_minutes = settings.TELEGRAM_SUMMARY_INTERVAL_MINUTES
+    if data.action == "enable":
+        authorized_recipient_count = int(await db.scalar(
+            select(func.count(TelegramIdentity.id))
+            .join(User, User.id == TelegramIdentity.user_id)
+            .where(
+                TelegramIdentity.automatic_summary_recipient.is_(True),
+                User.is_active.is_(True),
+                User.role.in_((Role.admin.value, Role.operator.value)),
+            )
+        ) or 0)
+        if not setting.enabled or authorized_recipient_count == 0:
+            await snapshot_summary_cursor(db, reason="automatic summary enabled")
+        setting.enabled = True
+        setting.updated_by = user.id
+        identity.automatic_summary_recipient = True
+    elif data.action == "disable":
+        setting.enabled = False
+        setting.updated_by = user.id
+    if data.action != "status":
+        add_activity_event(
+            db,
+            user=user,
+            action=f"telegram.automatic_summary.{data.action}d",
+            source="telegram",
+            telegram_user_id=identity.telegram_user_id,
+            telegram_username=identity.telegram_username,
+            status="completed",
+        )
+        await db.commit()
+    elif db.is_modified(setting):
+        await db.commit()
+    recipients = list((await db.execute(
+        select(TelegramIdentity, User)
+        .join(User, User.id == TelegramIdentity.user_id)
+        .where(
+            TelegramIdentity.automatic_summary_recipient.is_(True),
+            User.is_active.is_(True),
+            User.role.in_((Role.admin.value, Role.operator.value)),
+        )
+        .order_by(User.username)
+    )).all())
+    return TelegramSummaryControlOut(
+        enabled=setting.enabled,
+        interval_minutes=setting.interval_minutes,
+        recipient_count=len(recipients),
+        caller_is_recipient=identity.automatic_summary_recipient,
+        recipients=[
+            {
+                "telegram_user_id": recipient.telegram_user_id,
+                "username": recipient_user.username,
+                "role": recipient_user.role,
+                "language": recipient.preferred_language,
+            }
+            for recipient, recipient_user in recipients
+        ],
+    )
 
 
 @router.post("/telegram/workflows/start")

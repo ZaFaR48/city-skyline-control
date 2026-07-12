@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
@@ -169,6 +170,10 @@ class Station(Base):
     last_ping_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     offline_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     consecutive_ping_failures: Mapped[int] = mapped_column(Integer, default=0)
+    consecutive_ping_successes: Mapped[int] = mapped_column(Integer, default=0)
+    consecutive_high_latency: Mapped[int] = mapped_column(Integer, default=0)
+    consecutive_low_latency: Mapped[int] = mapped_column(Integer, default=0)
+    recovery_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     approved_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -325,6 +330,7 @@ class UserRegistrationRequest(Base):
     __table_args__ = (
         Index("ix_registration_telegram", "telegram_user_id", unique=True),
         Index("ix_registration_status", "status"),
+        CheckConstraint("preferred_language IN ('tj', 'ru', 'en')", name="ck_registration_preferred_language"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -335,6 +341,7 @@ class UserRegistrationRequest(Base):
     display_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default=RegistrationStatus.pending.value)
     assigned_role: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    preferred_language: Mapped[str] = mapped_column(String(2), default="tj")
     requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     reviewed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
@@ -348,7 +355,10 @@ class UserRegistrationRequest(Base):
 
 class TelegramIdentity(Base):
     __tablename__ = "telegram_identities"
-    __table_args__ = (Index("ix_telegram_identity_user", "telegram_user_id", unique=True),)
+    __table_args__ = (
+        Index("ix_telegram_identity_user", "telegram_user_id", unique=True),
+        CheckConstraint("preferred_language IN ('tj', 'ru', 'en')", name="ck_telegram_identity_preferred_language"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True)
@@ -356,7 +366,22 @@ class TelegramIdentity(Base):
     telegram_username: Mapped[str | None] = mapped_column(String(64), nullable=True)
     first_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
     last_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    preferred_language: Mapped[str] = mapped_column(String(2), default="tj")
+    automatic_summary_recipient: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class TelegramSummarySetting(Base):
+    __tablename__ = "telegram_summary_settings"
+    __table_args__ = (CheckConstraint("interval_minutes > 0", name="ck_telegram_summary_interval_positive"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, default=1)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    interval_minutes: Mapped[int] = mapped_column(Integer, default=10)
+    updated_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

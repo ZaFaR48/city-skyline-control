@@ -10,7 +10,7 @@ from aiogram.types import CallbackQuery, Message
 
 from api import BackendAPIError, api
 from authorization import require_telegram_roles
-from i18n import all_menu_labels, t
+from i18n import all_menu_labels, localized_error, t
 from keyboards import main_keyboard, wizard_inline
 from states import OperationsLookup
 from validators import clean_text, normalize_station_code
@@ -127,7 +127,7 @@ async def operations_callback(callback: CallbackQuery, state: FSMContext) -> Non
     elif action.startswith("state-"):
         await _send_state(callback.message, state, action.removeprefix("state-"))
     else:
-        await callback.answer("Invalid action", show_alert=True)
+        await callback.answer(t(lang, "invalid_callback"), show_alert=True)
         return
     await callback.answer()
 
@@ -168,7 +168,8 @@ async def _send_exact_code(message: Message, state: FSMContext, raw_code: str) -
     try:
         rows = await api.operational_stations("all", code)
     except BackendAPIError as exc:
-        await message.answer(f"{t(await _lang(state), 'api_error')} {exc.message}")
+        lang = await _lang(state)
+        await message.answer(localized_error(lang, exc.message))
         return
     exact = [row for row in rows if str(row.get("station_code", "")).casefold() == code.casefold()]
     await _send_rows(message, state, exact, detailed=True)
@@ -178,7 +179,8 @@ async def _send_district(message: Message, state: FSMContext, code: str) -> None
     try:
         rows = await api.operational_stations("all", DISTRICTS[code])
     except BackendAPIError as exc:
-        await message.answer(f"{t(await _lang(state), 'api_error')} {exc.message}")
+        lang = await _lang(state)
+        await message.answer(localized_error(lang, exc.message))
         return
     await _send_rows(message, state, [row for row in rows if row.get("district") == DISTRICTS[code] and _is_production(row)])
 
@@ -188,7 +190,8 @@ async def _send_state(message: Message, state: FSMContext, production_state: str
         try:
             rows = await api.operational_stations("all")
         except BackendAPIError as exc:
-            await message.answer(f"{t(await _lang(state), 'api_error')} {exc.message}")
+            lang = await _lang(state)
+            await message.answer(localized_error(lang, exc.message))
             return
         await _send_rows(message, state, [row for row in rows if _is_production(row) and _health_status(row) == production_state])
     else:
@@ -199,7 +202,8 @@ async def _send_view(message: Message, state: FSMContext, view: str, *, active_o
     try:
         rows = await api.operational_stations(view)
     except BackendAPIError as exc:
-        await message.answer(f"{t(await _lang(state), 'api_error')} {exc.message}")
+        lang = await _lang(state)
+        await message.answer(localized_error(lang, exc.message))
         return
     if active_only:
         rows = [row for row in rows if _is_production(row)]

@@ -413,6 +413,7 @@ class RegistrationOut(ORMModel):
     display_name: str | None
     status: RegistrationStatus
     assigned_role: Role | None
+    preferred_language: Literal["tj", "ru", "en"]
     requested_at: datetime
     reviewed_at: datetime | None
 
@@ -426,6 +427,7 @@ class RegistrationStatusOut(BaseModel):
     expires_at: datetime | None = None
     is_active: bool | None = None
     activation_required: bool = False
+    preferred_language: Literal["tj", "ru", "en"] = "tj"
 
 
 class TelegramLinkPreviewIn(BaseModel):
@@ -710,6 +712,23 @@ class TelegramRoleOut(BaseModel):
     username: str
     role: Role
     is_active: bool
+    preferred_language: Literal["tj", "ru", "en"]
+
+
+class TelegramLanguageIn(TelegramActorIn):
+    language: Literal["tj", "ru", "en"]
+
+
+class TelegramSummaryControlIn(TelegramActorIn):
+    action: Literal["enable", "disable", "status"]
+
+
+class TelegramSummaryControlOut(BaseModel):
+    enabled: bool
+    interval_minutes: int
+    recipient_count: int
+    caller_is_recipient: bool
+    recipients: list[dict[str, Any]]
 
 
 class PresenceHeartbeatOut(BaseModel):

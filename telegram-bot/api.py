@@ -119,6 +119,22 @@ class BackendAPI:
         data = await self._request("POST", "/api/activity/telegram/resolve", json=self.telegram_actor(user))
         return dict(data or {})
 
+    async def set_telegram_language(self, user: Any, language: str) -> dict[str, Any]:
+        data = await self._request(
+            "POST",
+            "/api/registrations/telegram/language",
+            json={**self.telegram_actor(user), "language": language},
+        )
+        return dict(data or {})
+
+    async def automatic_summary_control(self, user: Any, action: str) -> dict[str, Any]:
+        data = await self._request(
+            "POST",
+            "/api/activity/telegram/summary-control",
+            json={**self.telegram_actor(user), "action": action},
+        )
+        return dict(data or {})
+
     async def start_station_workflow(
         self,
         user: Any,

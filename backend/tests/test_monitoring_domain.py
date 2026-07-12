@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import func, select
@@ -60,8 +60,61 @@ async def test_one_ping_failure_is_not_offline(db):
     first = await station(db, "91003", StationStatus.online.value)
     await node(db, first.id, key="failure-node")
     result = await StationStatusResolver.resolve_ping(db, first, success=False, latency_ms=None, error_type="unreachable")
-    assert result.new_status == StationStatus.degraded.value
+    assert result.new_status == StationStatus.online.value
     assert first.consecutive_ping_failures == 1
+
+
+@pytest.mark.asyncio
+async def test_one_success_does_not_recover_unknown_station(db):
+    first = await station(db, "91009", StationStatus.unknown.value)
+    await node(db, first.id, key="unknown-recovery-node")
+    result = await StationStatusResolver.resolve_ping(db, first, success=True, latency_ms=40)
+    assert result.new_status == StationStatus.unknown.value
+    assert result.transitioned is False
+
+
+@pytest.mark.asyncio
+async def test_high_latency_requires_three_consecutive_checks_and_exit_is_stable(db):
+    first = await station(db, "91006", StationStatus.online.value)
+    await node(db, first.id, key="latency-hysteresis-node")
+    started = datetime.now(timezone.utc)
+    first_sample = await StationStatusResolver.resolve_ping(db, first, success=True, latency_ms=210, checked_at=started)
+    second_sample = await StationStatusResolver.resolve_ping(db, first, success=True, latency_ms=220, checked_at=started + timedelta(seconds=30))
+    assert first_sample.new_status == "online" and second_sample.new_status == "online"
+    entered = await StationStatusResolver.resolve_ping(db, first, success=True, latency_ms=230, checked_at=started + timedelta(seconds=60))
+    assert entered.new_status == "degraded" and entered.transitioned
+    for offset in (90, 120, 150):
+        result = await StationStatusResolver.resolve_ping(db, first, success=True, latency_ms=140, checked_at=started + timedelta(seconds=offset))
+        assert result.new_status == "degraded"
+    recovered = await StationStatusResolver.resolve_ping(db, first, success=True, latency_ms=140, checked_at=started + timedelta(seconds=180))
+    assert recovered.new_status == "online" and recovered.transitioned
+
+
+@pytest.mark.asyncio
+async def test_offline_recovery_requires_stable_success_and_creates_one_event(db):
+    first = await station(db, "91007", StationStatus.offline.value)
+    await node(db, first.id, key="stable-recovery-node")
+    started = datetime.now(timezone.utc)
+    for offset in (0, 30, 60):
+        result = await StationStatusResolver.resolve_ping(db, first, success=True, latency_ms=100, checked_at=started + timedelta(seconds=offset))
+        assert result.new_status == "offline"
+    recovered = await StationStatusResolver.resolve_ping(db, first, success=True, latency_ms=100, checked_at=started + timedelta(seconds=90))
+    assert recovered.new_status == "online" and recovered.transitioned
+    await StationStatusResolver.resolve_ping(db, first, success=True, latency_ms=100, checked_at=started + timedelta(seconds=120))
+    recovery_events = int(await db.scalar(select(func.count()).select_from(StationStatusEvent).where(StationStatusEvent.station_id == first.id, StationStatusEvent.new_status == "online")) or 0)
+    assert recovery_events == 1
+
+
+@pytest.mark.asyncio
+async def test_unchanged_degraded_checks_do_not_duplicate_events(db):
+    first = await station(db, "91008", StationStatus.degraded.value)
+    first.status_reason = "PING_HIGH_LATENCY: 220 ms"
+    await node(db, first.id, key="steady-degraded-node")
+    started = datetime.now(timezone.utc)
+    for offset in (0, 30, 60, 90):
+        await StationStatusResolver.resolve_ping(db, first, success=True, latency_ms=230, checked_at=started + timedelta(seconds=offset))
+    count = int(await db.scalar(select(func.count()).select_from(StationStatusEvent).where(StationStatusEvent.station_id == first.id)) or 0)
+    assert count == 0
 
 
 @pytest.mark.asyncio
@@ -74,7 +127,11 @@ async def test_offline_transition_is_single_and_recovery_closes_event(db):
     await StationStatusResolver.resolve_ping(db, first, success=False, latency_ms=None, error_type="unreachable")
     open_count = (await db.execute(select(func.count(StationStatusEvent.id)).where(StationStatusEvent.station_id == first.id, StationStatusEvent.ended_at.is_(None)))).scalar_one()
     assert open_count == 1
-    await StationStatusResolver.resolve_ping(db, first, success=True, latency_ms=20)
+    started = datetime.now(timezone.utc)
+    for offset in (0, 30, 60, 90):
+        await StationStatusResolver.resolve_ping(
+            db, first, success=True, latency_ms=20, checked_at=started + timedelta(seconds=offset)
+        )
     offline_event = (await db.execute(select(StationStatusEvent).where(StationStatusEvent.station_id == first.id, StationStatusEvent.new_status == "offline"))).scalar_one()
     assert offline_event.ended_at is not None
     assert offline_event.duration_seconds is not None and offline_event.duration_seconds >= 0

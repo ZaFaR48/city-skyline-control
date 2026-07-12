@@ -28,6 +28,10 @@ MENU = {
         "camera": "📷 Камера",
         "network_status": "📊 Ҳолати шабака",
         "alerts": "⚠️ Огоҳиномаҳо",
+        "change_language": "🌐 Иваз кардани забон",
+        "summary_enable": "Хулосаи автоматӣ: фаъол",
+        "summary_disable": "Хулосаи автоматӣ: хомӯш",
+        "summary_status": "Ҳолати хулосаи автоматӣ",
         "reports": "📝 Ҳисобот",
         "settings": "⚙️ Танзимот",
     },
@@ -45,6 +49,10 @@ MENU = {
         "camera": "📷 Камера",
         "network_status": "📊 Состояние сети",
         "alerts": "⚠️ Оповещения",
+        "change_language": "🌐 Изменить язык",
+        "summary_enable": "Автосводка: включить",
+        "summary_disable": "Автосводка: выключить",
+        "summary_status": "Статус автосводки",
         "reports": "📝 Отчеты",
         "settings": "⚙️ Настройки",
     },
@@ -62,6 +70,10 @@ MENU = {
         "camera": "📷 Camera",
         "network_status": "📊 Network status",
         "alerts": "⚠️ Alerts",
+        "change_language": "🌐 Change language",
+        "summary_enable": "Enable automatic summary",
+        "summary_disable": "Disable automatic summary",
+        "summary_status": "Automatic summary status",
         "reports": "📝 Reports",
         "settings": "⚙️ Settings",
     },
@@ -286,7 +298,7 @@ TEXT["tj"].update({
     "reason_CONFLICTING_TELEMETRY": "сабаби дақиқ муайян нашуд",
 })
 TEXT["en"].update({
-    "wizard_step": "Step {step} of 7", "enter_code": "Enter the station code. Example: 10002",
+    "wizard_step": "Step {step}/7", "enter_code": "Enter the station code. Example: 10002",
     "existing_edit_notice": "Station {code} exists. You will edit the existing record.",
     "keep_current": "Keep current data", "edit_station": "Edit station data", "no_changes": "No changes were made.",
     "back": "⬅️ Back", "select_city": "Select the city", "city_dushanbe": "Dushanbe",
@@ -339,6 +351,70 @@ TEXT["en"].update({
     "reason_CONFLICTING_TELEMETRY": "exact cause is not determined",
 })
 
+TEXT["tj"].update({
+    "registration_pending": "Дархости дастрасии шумо ба администратор фиристода шуд.",
+    "registration_rejected": "Дархости шумо рад шуд. Ба администратори City Parking муроҷиат кунед.",
+    "registration_clarification": "Администратор шарҳи иловагӣ дархост кард. Ба дастгирии City Parking муроҷиат кунед.",
+    "registration_awaiting": "Ҳисоби шумо фаъолсозиро интизор аст.",
+    "activated_welcome": "Хуш омадед, {username}.",
+    "activation_details": "Номи корбар: {username}\nНақш: {role}\nПайванди фаъолсозӣ: {url}\nПас аз фаъолсозӣ дар саҳифаи воридшавӣ маҳз ҳамин номи корбарро истифода баред. Пайванд якдафъаина аст.",
+    "registration_unavailable": "Хидмати сабти ном муваққатан дастнорас аст. Баъдтар такрор кунед.",
+    "access_help_text": "Барои сабти ном /start, барои санҷиши дастрасӣ «Дастрасии ман»-ро истифода баред ё ба администратор муроҷиат кунед.",
+    "admin_required": "Дастрасии администратор лозим аст.",
+    "access_inactive": "Дастрасӣ фаъол нест. /start ё «Дастрасии ман»-ро истифода баред.",
+    "pending_none": "Дархости интизор нест.", "pending_user_label": "Корбари интизор",
+    "label_name": "Ном", "label_telegram_username": "Номи Telegram",
+    "invalid_callback": "Тугма нодуруст ё кӯҳна аст.", "registration_reviewed": "Дархост баррасӣ шуд.",
+    "summary_enabled": "Хулосаи автоматӣ фаъол аст.", "summary_disabled": "Хулосаи автоматӣ хомӯш аст.",
+    "summary_control_status": "Хулосаи автоматӣ: {state}\nФосила: {interval} дақ\nҚабулкунандагон: {recipients}\nШумо қабулкунанда ҳастед: {caller}",
+    "yes": "ҳа", "no": "не", "permission_denied": "Барои ин амал иҷозат надоред.",
+    "registration_status_pending": "интизор", "registration_status_pre_approved": "пешакӣ тасдиқшуда", "registration_status_clarification_requested": "шарҳ дархост шуд", "registration_status_approved": "тасдиқшуда", "registration_status_rejected": "радшуда", "registration_status_activated": "фаъол",
+    "approve_admin": "Тасдиқ ҳамчун ADMIN", "approve_operator": "Тасдиқ ҳамчун OPERATOR", "approve_viewer": "Тасдиқ ҳамчун VIEWER", "reject_access": "Рад кардан",
+    "station_changed_restart": "Маълумоти стансия тағйир ёфт; навсозиро аз нав оғоз кунед.", "station_code_conflict": "Коди стансия аллакай мавҷуд аст; сабт қатъ шуд.", "canonical_region_unavailable": "Маълумоти расмии минтақа дастнорас аст.",
+})
+TEXT["ru"].update({
+    "registration_pending": "Ваш запрос доступа отправлен администратору.",
+    "registration_rejected": "Ваш запрос отклонён. Обратитесь к администратору City Parking.",
+    "registration_clarification": "Администратор запросил уточнение. Обратитесь в поддержку City Parking.",
+    "registration_awaiting": "Ваша учётная запись ожидает активации.",
+    "activated_welcome": "Добро пожаловать, {username}.",
+    "activation_details": "Имя пользователя: {username}\nРоль: {role}\nСсылка активации: {url}\nПосле активации используйте на странице входа именно это имя пользователя. Ссылка одноразовая.",
+    "registration_unavailable": "Сервис регистрации временно недоступен. Повторите позже.",
+    "access_help_text": "Используйте /start для регистрации, «Мой доступ» для проверки или обратитесь к администратору.",
+    "admin_required": "Требуется доступ администратора.",
+    "access_inactive": "Доступ не активен. Используйте /start или «Мой доступ».",
+    "pending_none": "Нет ожидающих запросов.", "pending_user_label": "Ожидающий пользователь",
+    "label_name": "Имя", "label_telegram_username": "Имя Telegram",
+    "invalid_callback": "Кнопка недействительна или устарела.", "registration_reviewed": "Запрос рассмотрен.",
+    "summary_enabled": "Автоматическая сводка включена.", "summary_disabled": "Автоматическая сводка выключена.",
+    "summary_control_status": "Автосводка: {state}\nИнтервал: {interval} мин\nПолучателей: {recipients}\nВы получатель: {caller}",
+    "yes": "да", "no": "нет", "permission_denied": "Недостаточно прав для этого действия.",
+    "registration_status_pending": "ожидает", "registration_status_pre_approved": "предварительно одобрен", "registration_status_clarification_requested": "запрошено уточнение", "registration_status_approved": "одобрен", "registration_status_rejected": "отклонён", "registration_status_activated": "активен",
+    "approve_admin": "Одобрить как ADMIN", "approve_operator": "Одобрить как OPERATOR", "approve_viewer": "Одобрить как VIEWER", "reject_access": "Отклонить",
+    "station_changed_restart": "Данные станции изменились; начните обновление заново.", "station_code_conflict": "Код станции уже существует; создание остановлено.", "canonical_region_unavailable": "Справочник регионов недоступен.",
+})
+TEXT["en"].update({
+    "registration_pending": "Your access request was sent to the administrator.",
+    "registration_rejected": "Your request was rejected. Contact a City Parking administrator.",
+    "registration_clarification": "The administrator requested clarification. Contact City Parking support.",
+    "registration_awaiting": "Your account is awaiting activation.",
+    "activated_welcome": "Welcome, {username}.",
+    "activation_details": "System username: {username}\nRole: {role}\nActivation URL: {url}\nAfter activation, use this exact username on the login page. The link is single-use.",
+    "registration_unavailable": "The registration service is temporarily unavailable. Try again later.",
+    "access_help_text": "Use /start to register, My access to check access, or contact an administrator.",
+    "admin_required": "Administrator access is required.",
+    "access_inactive": "Access is not active. Use /start or My access.",
+    "pending_none": "No pending requests.", "pending_user_label": "Pending user",
+    "label_name": "Name", "label_telegram_username": "Telegram username",
+    "invalid_callback": "This button is invalid or stale.", "registration_reviewed": "Registration reviewed.",
+    "summary_enabled": "Automatic summary is enabled.", "summary_disabled": "Automatic summary is disabled.",
+    "summary_control_status": "Automatic summary: {state}\nInterval: {interval} min\nRecipients: {recipients}\nYou are a recipient: {caller}",
+    "yes": "yes", "no": "no", "permission_denied": "You do not have permission for this action.",
+    "registration_status_pending": "pending", "registration_status_pre_approved": "pre-approved", "registration_status_clarification_requested": "clarification requested", "registration_status_approved": "approved", "registration_status_rejected": "rejected", "registration_status_activated": "active",
+    "approve_admin": "Approve as ADMIN", "approve_operator": "Approve as OPERATOR", "approve_viewer": "Approve as VIEWER", "reject_access": "Reject",
+    "station_changed_restart": "The station changed; restart the update.", "station_code_conflict": "The station code already exists; creation stopped.", "canonical_region_unavailable": "Canonical region data is unavailable.",
+})
+
 
 def lang_or_default(lang: str | None) -> str:
     return lang if lang in TEXT else "tj"
@@ -360,3 +436,24 @@ def all_menu_labels(key: str) -> set[str]:
 
 def all_texts(key: str) -> set[str]:
     return {labels[key] for labels in TEXT.values()}
+
+
+def localized_error(lang: str | None, code: str | None) -> str:
+    keys = {
+        "STATION_CODE_EXISTS": "station_code_conflict",
+        "STATION_NOT_FOUND": "update_not_found",
+        "WORKFLOW_ID_CONFLICT": "stale_action",
+        "WORKFLOW_NOT_FOUND": "stale_action",
+        "WORKFLOW_ALREADY_FINISHED": "stale_action",
+        "INVALID_CITY": "canonical_region_unavailable",
+        "INVALID_DISTRICT": "canonical_region_unavailable",
+        "NO_STATION_FIELDS": "no_field_changes",
+        "TELEGRAM_IDENTITY_NOT_ACTIVE": "access_inactive",
+        "TELEGRAM_ROLE_FORBIDDEN": "permission_denied",
+    }
+    value = str(code or "").strip()
+    selected = lang_or_default(lang)
+    if value in TEXT[selected].values():
+        return value
+    key = keys.get(value)
+    return t(lang, key) if key else t(lang, "api_error")

@@ -14,7 +14,7 @@ def start_scheduler() -> AsyncIOScheduler:
     sched.add_job(
         run_operations_summary_job,
         "interval",
-        minutes=10,
+        minutes=settings.TELEGRAM_SUMMARY_INTERVAL_MINUTES,
         id="telegram_operations_summary",
         max_instances=1,
         coalesce=True,

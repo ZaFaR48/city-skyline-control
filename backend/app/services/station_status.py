@@ -30,6 +30,44 @@ class StatusResolution:
     reason: str
 
 
+def _reset_hysteresis(station: Station) -> None:
+    station.consecutive_ping_failures = 0
+    station.consecutive_ping_successes = 0
+    station.consecutive_high_latency = 0
+    station.consecutive_low_latency = 0
+    station.recovery_started_at = None
+
+
+def _recovery_confirmed(station: Station, now: datetime) -> bool:
+    return bool(
+        station.consecutive_ping_successes >= settings.PING_SUCCESS_THRESHOLD
+        and station.recovery_started_at
+        and (now - station.recovery_started_at).total_seconds() >= settings.RECOVERY_STABLE_SECONDS
+    )
+
+
+def _suppressed(station: Station, reason: str) -> StatusResolution:
+    status = station.status or StationStatus.unknown.value
+    if 1 in {
+        int(station.consecutive_ping_failures or 0),
+        int(station.consecutive_ping_successes or 0),
+        int(station.consecutive_high_latency or 0),
+        int(station.consecutive_low_latency or 0),
+    }:
+        logging.getLogger(__name__).info(
+            "station_status_transition_suppressed station_id=%s station_code=%s status=%s reason=%s failures=%s successes=%s high_latency=%s low_latency=%s",
+            station.id,
+            station.station_code,
+            status,
+            reason,
+            station.consecutive_ping_failures,
+            station.consecutive_ping_successes,
+            station.consecutive_high_latency,
+            station.consecutive_low_latency,
+        )
+    return StatusResolution(status, status, False, reason)
+
+
 class StationStatusResolver:
     """The single authority for persisted station state transitions."""
 
@@ -56,41 +94,92 @@ class StationStatusResolver:
 
         station.last_ping_at = now
         station.last_ping_ms = round(latency_ms) if success and latency_ms is not None else None
+        previous = station.status or StationStatus.unknown.value
 
         if not station.vpn_ip or not node:
-            station.consecutive_ping_failures = 0 if success else station.consecutive_ping_failures
-            new_status = StationStatus.unknown.value
-            reason = "MONITORING_NOT_CONFIGURED"
-        elif success:
-            station.consecutive_ping_failures = 0
-            station.last_seen_at = now
-            if not node.online:
-                new_status = StationStatus.degraded.value
-                reason = "HEADSCALE_OFFLINE"
-            elif latency_ms is not None and latency_ms > settings.DEGRADED_LATENCY_MS:
-                new_status = StationStatus.degraded.value
-                reason = f"PING_HIGH_LATENCY: {round(latency_ms)} ms"
-            else:
-                new_status = StationStatus.online.value
-                reason = "HEALTHY"
-        else:
-            station.consecutive_ping_failures += 1
-            node_stale = (
-                not node.online
-                and (
-                    node.last_seen_at is None
-                    or (now - node.last_seen_at).total_seconds() >= settings.OFFLINE_AFTER_SECONDS
-                )
+            _reset_hysteresis(station)
+            return await StationStatusResolver.transition(
+                db,
+                station,
+                new_status=StationStatus.unknown,
+                source=EventSource.ping,
+                reason="MONITORING_NOT_CONFIGURED",
+                occurred_at=now,
             )
-            confirmed = station.consecutive_ping_failures >= settings.PING_FAIL_THRESHOLD or node_stale
-            if confirmed:
-                new_status = StationStatus.offline.value
-                reason = f"PING_TIMEOUT: {error_type or 'connectivity failure'}"
-            else:
-                new_status = StationStatus.degraded.value
-                reason = f"PING_TIMEOUT: {error_type or 'temporary connectivity failure'} {station.consecutive_ping_failures}/{settings.PING_FAIL_THRESHOLD}"
 
-        return await StationStatusResolver.transition(
+        if not success:
+            station.consecutive_ping_failures = int(station.consecutive_ping_failures or 0) + 1
+            station.consecutive_ping_successes = 0
+            station.consecutive_high_latency = 0
+            station.consecutive_low_latency = 0
+            station.recovery_started_at = None
+            if station.consecutive_ping_failures < settings.PING_FAIL_THRESHOLD:
+                return _suppressed(station, "connectivity failure below confirmation threshold")
+            return await StationStatusResolver.transition(
+                db,
+                station,
+                new_status=StationStatus.offline,
+                source=EventSource.ping,
+                reason=f"PING_TIMEOUT: {error_type or 'connectivity failure'}",
+                occurred_at=now,
+            )
+
+        station.consecutive_ping_failures = 0
+        station.consecutive_ping_successes = int(station.consecutive_ping_successes or 0) + 1
+        station.last_seen_at = now
+
+        latency = latency_ms or 0.0
+        if latency >= settings.DEGRADED_ENTER_MS:
+            station.consecutive_high_latency = int(station.consecutive_high_latency or 0) + 1
+            station.consecutive_low_latency = 0
+            if previous == StationStatus.offline.value:
+                station.recovery_started_at = station.recovery_started_at or now
+                if not _recovery_confirmed(station, now):
+                    return _suppressed(station, "offline recovery not yet stable")
+            else:
+                station.recovery_started_at = None
+            if (
+                previous != StationStatus.degraded.value
+                and station.consecutive_high_latency < settings.DEGRADED_CONSECUTIVE_CHECKS
+            ):
+                return _suppressed(station, "high latency below confirmation threshold")
+            return await StationStatusResolver.transition(
+                db,
+                station,
+                new_status=StationStatus.degraded,
+                source=EventSource.ping,
+                reason=f"PING_HIGH_LATENCY: {round(latency)} ms",
+                occurred_at=now,
+            )
+
+        if latency <= settings.DEGRADED_EXIT_MS:
+            station.consecutive_low_latency = int(station.consecutive_low_latency or 0) + 1
+            station.consecutive_high_latency = 0
+            if previous != StationStatus.online.value:
+                station.recovery_started_at = station.recovery_started_at or now
+                if (
+                    station.consecutive_low_latency < settings.DEGRADED_EXIT_CONSECUTIVE_CHECKS
+                    or not _recovery_confirmed(station, now)
+                ):
+                    return _suppressed(station, "healthy recovery not yet stable")
+            else:
+                station.recovery_started_at = None
+        else:
+            station.consecutive_high_latency = 0
+            station.consecutive_low_latency = 0
+            if previous == StationStatus.degraded.value:
+                station.recovery_started_at = None
+                return _suppressed(station, "latency remains inside hysteresis band")
+            if previous == StationStatus.offline.value:
+                station.recovery_started_at = station.recovery_started_at or now
+                if not _recovery_confirmed(station, now):
+                    return _suppressed(station, "offline recovery not yet stable")
+
+        if not node.online:
+            new_status, reason = StationStatus.degraded, "HEADSCALE_OFFLINE"
+        else:
+            new_status, reason = StationStatus.online, "HEALTHY"
+        result = await StationStatusResolver.transition(
             db,
             station,
             new_status=new_status,
@@ -98,6 +187,9 @@ class StationStatusResolver:
             reason=reason,
             occurred_at=now,
         )
+        if result.transitioned:
+            station.recovery_started_at = None
+        return result
 
     @staticmethod
     async def transition(

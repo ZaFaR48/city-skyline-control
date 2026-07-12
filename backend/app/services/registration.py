@@ -57,6 +57,7 @@ async def create_activation(
                 telegram_username=registration.telegram_username,
                 first_name=registration.first_name,
                 last_name=registration.last_name,
+                preferred_language=registration.preferred_language,
             )
         )
 

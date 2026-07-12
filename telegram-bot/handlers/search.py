@@ -6,7 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message
 
 from api import BackendAPIError, api
-from i18n import all_menu_labels, all_texts, t
+from i18n import all_menu_labels, all_texts, localized_error, t
 from keyboards import main_keyboard
 from states import SearchStation
 from validators import clean_text
@@ -48,7 +48,7 @@ async def search_query(message: Message, state: FSMContext) -> None:
     try:
         rows = await api.search_stations(query)
     except BackendAPIError as exc:
-        await message.answer(f"{t(lang, 'api_error')} {exc.message}", reply_markup=main_keyboard(lang, role=role))
+        await message.answer(localized_error(lang, exc.message), reply_markup=main_keyboard(lang, role=role))
         await state.clear()
         await state.update_data(lang=lang)
         return

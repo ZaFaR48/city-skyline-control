@@ -161,6 +161,12 @@ def resolve_station_health(
         reason_code = "MONITORING_NOT_CONFIGURED"
     elif ping is None or ping_age is None or ping_age > settings.OFFLINE_AFTER_SECONDS:
         reason_code = "INSUFFICIENT_FRESH_DATA"
+    elif (
+        station.status == StationStatus.offline.value
+        or int(station.consecutive_ping_failures or 0) >= settings.PING_FAIL_THRESHOLD
+    ):
+        connectivity_status = "offline"
+        overall_status, reason_code = StationStatus.offline.value, "PING_TIMEOUT"
     elif ping.success:
         connectivity_status = "online"
         if camera_status == "offline":
@@ -170,16 +176,25 @@ def resolve_station_health(
         elif headscale_status in {"offline", "stale"}:
             overall_status = StationStatus.degraded.value
             reason_code = "HEADSCALE_OFFLINE" if headscale_status == "offline" else "HEADSCALE_LAST_SEEN_STALE"
-        elif ping.latency_ms is not None and ping.latency_ms > settings.DEGRADED_LATENCY_MS:
+        elif (
+            station.status == StationStatus.degraded.value
+            and (station.status_reason or "").startswith("PING_HIGH_LATENCY")
+        ):
             overall_status, reason_code = StationStatus.degraded.value, "PING_HIGH_LATENCY"
         else:
             overall_status, reason_code = StationStatus.online.value, "HEALTHY"
     else:
-        connectivity_status = "offline" if station.consecutive_ping_failures >= settings.PING_FAIL_THRESHOLD or headscale_status == "stale" else "degraded"
-        if connectivity_status == "offline":
-            overall_status, reason_code = StationStatus.offline.value, "PING_TIMEOUT"
-        else:
-            overall_status, reason_code = StationStatus.degraded.value, "PING_TIMEOUT"
+        connectivity_status = "degraded"
+        overall_status = station.status if station.status in {
+            StationStatus.online.value,
+            StationStatus.degraded.value,
+        } else StationStatus.unknown.value
+        reason_code = (
+            "PING_HIGH_LATENCY"
+            if overall_status == StationStatus.degraded.value
+            and (station.status_reason or "").startswith("PING_HIGH_LATENCY")
+            else "HEALTHY" if overall_status == StationStatus.online.value else "INSUFFICIENT_FRESH_DATA"
+        )
 
     state_started = (
         current_event.started_at

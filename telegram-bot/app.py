@@ -14,6 +14,7 @@ from handlers.search import router as search_router
 from handlers.start import router as start_router
 from handlers.station import router as station_router
 from handlers.operations import router as operations_router
+from handlers.summary_admin import router as summary_admin_router
 from i18n import MENU, t
 from keyboards import main_keyboard
 
@@ -46,6 +47,7 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(language_router)
     dp.include_router(station_router)
     dp.include_router(operations_router)
+    dp.include_router(summary_admin_router)
     dp.include_router(search_router)
     dp.include_router(fallback_router)
     return dp
