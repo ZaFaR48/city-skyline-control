@@ -100,6 +100,14 @@ class BackendAPI:
         data = await self._request("PATCH", f"/api/stations/{station_id}", json=payload)
         return dict(data or {})
 
+    async def operational_stations(self, view: str = "all", query: str | None = None) -> list[dict[str, Any]]:
+        data = await self._request(
+            "GET",
+            "/api/onboarding/station-inventory",
+            params={"view": view, "q": query},
+        )
+        return list(data or [])
+
     async def create_camera(self, payload: dict[str, Any]) -> dict[str, Any]:
         data = await self._request("POST", "/api/cameras", json=payload)
         return dict(data or {})

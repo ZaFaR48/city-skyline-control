@@ -237,8 +237,8 @@ export const getRustdeskDevices = () =>
 
 export const getDistrictOnboardingStations = () =>
   apiFetch<Station[]>("/api/onboarding/districts/stations");
-export const getStationApprovalInventory = (approval: "pending" | "approved" | "all") =>
-  apiFetch<Station[]>(`/api/onboarding/stations${query({ approval })}`);
+export const getStationApprovalInventory = (approval: "pending" | "approved" | "all", q?: string) =>
+  apiFetch<Station[]>(`/api/onboarding/stations${query({ approval, q })}`);
 export const previewStationApproval = (stationId: number, action: "approve" | "revoke") =>
   apiFetch<StationApprovalPreview>(
     `/api/onboarding/stations/${stationId}/${action === "approve" ? "approval-preview" : "revocation-preview"}`,
@@ -272,8 +272,8 @@ export const applyStationRepair = (
     method: "POST",
     body: JSON.stringify({ ...changes, preview_token: previewToken, confirmation }),
   });
-export const getStationInventory = (view: string) =>
-  apiFetch<Station[]>(`/api/onboarding/station-inventory${query({ view })}`);
+export const getStationInventory = (view: string, q?: string) =>
+  apiFetch<Station[]>(`/api/onboarding/station-inventory${query({ view, q })}`);
 export const previewStationLifecycle = (stationId: number, action: "archive" | "restore") =>
   apiFetch<StationLifecyclePreview>(`/api/onboarding/stations/${stationId}/${action}-preview`, {
     method: "POST",

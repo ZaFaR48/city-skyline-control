@@ -5,12 +5,13 @@ import pytest
 from sqlalchemy import select
 from starlette.requests import Request
 
-from app.models import AuditLog, HeadscaleNode, OperationalRegion, Station, User
+from app.models import ApprovalStatus, AuditLog, HeadscaleNode, OperationalRegion, Station, User
 from app.routers.headscale import (
     apply_node_classification,
     approve_node,
     preview_node_approval,
     preview_node_classification,
+    list_nodes,
 )
 from app.routers.stations import update_station
 from app.schemas import (
@@ -176,3 +177,16 @@ async def test_classification_enforces_one_to_one_and_never_targets_production_n
     assert not preview.valid and preview.preview_token is None
     assert any("another Headscale node" in error for error in preview.errors)
     assert node.vpn_ip != "100.64.0.23"
+
+
+@pytest.mark.asyncio
+async def test_headscale_search_combines_with_filters_and_matches_node_and_station(db):
+    station, node, admin = await inventory(db, "93205")
+    node.approval_status = "approved"
+    node.device_type = "station"
+    node.station_id = station.id
+    await db.flush()
+    by_id = await list_nodes(q=str(node.id), approval_status=ApprovalStatus.approved, db=db, _=admin)
+    by_station = await list_nodes(q=station.station_code, linked=True, db=db, _=admin)
+    assert node.id in {item.id for item in by_id}
+    assert node.id in {item.id for item in by_station}

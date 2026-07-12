@@ -18,6 +18,7 @@ MENU = {
         "register_station": "➕ Сабти стансияи нав",
         "update_station": "✏️ Нав кардани стансияи мавҷуда",
         "search_station": "🔍 Ҷустуҷӯи стансия",
+        "station_summary": "📋 Маълумоти стансияҳо",
         "scan_qr": "📷 Скан кардани QR",
         "rustdesk": "🖥 RustDesk",
         "vpn": "🌐 VPN",
@@ -32,6 +33,7 @@ MENU = {
         "register_station": "➕ Зарегистрировать новую станцию",
         "update_station": "✏️ Обновить существующую станцию",
         "search_station": "🔍 Поиск станции",
+        "station_summary": "📋 Сводка по станциям",
         "scan_qr": "📷 Сканировать QR",
         "rustdesk": "🖥 RustDesk",
         "vpn": "🌐 VPN",
@@ -46,6 +48,7 @@ MENU = {
         "register_station": "➕ Register a new station",
         "update_station": "✏️ Update an existing station",
         "search_station": "🔍 Search station",
+        "station_summary": "📋 Station summaries",
         "scan_qr": "📷 Scan QR",
         "rustdesk": "🖥 RustDesk",
         "vpn": "🌐 VPN",
@@ -197,6 +200,13 @@ TEXT["ru"].update({
     "update_not_found": "Станция с таким точным кодом не найдена.",
     "field_saved": "Изменено только выбранное поле. Статус допуска не изменён.",
     "create_flow": "Регистрация новой станции", "update_flow": "Обновление существующей станции",
+    "ops_title": "Операционная сводка по станциям", "ops_all": "Все активные станции",
+    "ops_code": "Станция по точному коду", "ops_district": "Станции по району",
+    "ops_state": "Станции по production-статусу", "ops_enter_code": "Введите точный код станции.",
+    "ops_denied": "Операционная сводка доступна только администраторам и операторам.",
+    "ops_empty": "Станции по выбранному условию не найдены.", "ops_linked": "Узел Headscale",
+    "ops_area": "Зона / ориентир", "ops_approval": "Production-статус", "ops_record": "Состояние записи",
+    "ops_choose_district": "Выберите район.", "ops_choose_state": "Выберите production-статус.",
 })
 TEXT["tj"].update({
     "wizard_step": "Қадами {step} аз 7", "enter_code": "Коди стансияро ворид кунед. Мисол: 10002",
@@ -229,6 +239,13 @@ TEXT["tj"].update({
     "update_not_found": "Стансия бо ин коди дақиқ ёфт нашуд.",
     "field_saved": "Танҳо майдони интихобшуда тағйир ёфт. Тасдиқ тағйир наёфт.",
     "create_flow": "Сабти стансияи нав", "update_flow": "Навсозии стансияи мавҷуда",
+    "ops_title": "Хулосаи амалиётии стансияҳо", "ops_all": "Ҳамаи стансияҳои фаъол",
+    "ops_code": "Стансия бо коди дақиқ", "ops_district": "Стансияҳо аз рӯи ноҳия",
+    "ops_state": "Стансияҳо аз рӯи ҳолати истеҳсолӣ", "ops_enter_code": "Коди дақиқи стансияро ворид кунед.",
+    "ops_denied": "Хулосаи амалиётӣ танҳо барои администратор ва оператор дастрас аст.",
+    "ops_empty": "Бо шарти интихобшуда стансия ёфт нашуд.", "ops_linked": "Узели Headscale",
+    "ops_area": "Минтақа / ориентир", "ops_approval": "Ҳолати истеҳсолӣ", "ops_record": "Ҳолати сабт",
+    "ops_choose_district": "Ноҳияро интихоб кунед.", "ops_choose_state": "Ҳолати истеҳсолиро интихоб кунед.",
 })
 TEXT["en"].update({
     "wizard_step": "Step {step} of 7", "enter_code": "Enter the station code. Example: 10002",
@@ -259,6 +276,13 @@ TEXT["en"].update({
     "update_not_found": "No station was found with that exact code.",
     "field_saved": "Only the selected field changed. Approval status was preserved.",
     "create_flow": "Register a new station", "update_flow": "Update an existing station",
+    "ops_title": "Station operations summary", "ops_all": "All active stations",
+    "ops_code": "Station by exact code", "ops_district": "Stations by district",
+    "ops_state": "Stations by production state", "ops_enter_code": "Enter the exact station code.",
+    "ops_denied": "Operations summaries are available only to administrators and operators.",
+    "ops_empty": "No stations match the selected condition.", "ops_linked": "Headscale node",
+    "ops_area": "Operational area / landmark", "ops_approval": "Production state", "ops_record": "Record state",
+    "ops_choose_district": "Choose a district.", "ops_choose_state": "Choose a production state.",
 })
 
 

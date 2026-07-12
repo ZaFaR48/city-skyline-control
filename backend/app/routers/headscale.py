@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from sqlalchemy import func, select
+from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -30,6 +30,7 @@ router = APIRouter()
 
 @router.get("/nodes", response_model=list[HeadscaleNodeOut])
 async def list_nodes(
+    q: str | None = None,
     approval_status: ApprovalStatus | None = None,
     device_type: DeviceType | None = None,
     online: bool | None = None,
@@ -37,7 +38,19 @@ async def list_nodes(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_roles(Role.admin)),
 ):
-    stmt = select(HeadscaleNode)
+    stmt = select(HeadscaleNode).outerjoin(Station, HeadscaleNode.station_id == Station.id)
+    if q and q.strip():
+        like = f"%{q.strip()}%"
+        stmt = stmt.where(
+            or_(
+                cast(HeadscaleNode.id, String).ilike(like),
+                HeadscaleNode.hostname.ilike(like),
+                HeadscaleNode.given_name.ilike(like),
+                HeadscaleNode.vpn_ip.ilike(like),
+                Station.station_code.ilike(like),
+                Station.name.ilike(like),
+            )
+        )
     if approval_status:
         stmt = stmt.where(HeadscaleNode.approval_status == approval_status.value)
     if device_type:

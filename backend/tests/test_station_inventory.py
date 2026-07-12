@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from starlette.requests import Request
 import pytest
 from sqlalchemy import func, select
@@ -11,6 +12,7 @@ from app.routers.onboarding import (
     preview_station_restore,
     restore_inventory_station,
     suspected_duplicate_report,
+    station_inventory,
 )
 from app.routers.stations import archive_station as legacy_archive_station
 from app.schemas import StationLifecycleApplyIn
@@ -98,3 +100,14 @@ async def test_suspected_duplicate_report_is_read_only_and_explains_indicators(d
     assert "Review both records" in pair.recommendation
     assert int(await db.scalar(select(func.count()).select_from(AuditLog)) or 0) == before_audits
     assert not left.is_archived and not right.is_archived
+
+
+@pytest.mark.asyncio
+async def test_inventory_search_combines_with_pending_filter_and_operational_fields(db):
+    pending, admin = await inventory(db, "93305", name="Search target", address="Rudaki 55", area="Unique Landmark")
+    approved, _ = await inventory(db, "93306", name="Search target approved", address="Rudaki 56", area="Unique Landmark")
+    approved.approved_at = datetime.now(timezone.utc)
+    await db.flush()
+    rows = await station_inventory("pending", "Unique Landmark", db, admin)
+    assert pending.id in {row.id for row in rows}
+    assert approved.id not in {row.id for row in rows}

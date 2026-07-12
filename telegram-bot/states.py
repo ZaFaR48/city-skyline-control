@@ -25,3 +25,7 @@ class UpdateStation(StatesGroup):
 
 class SearchStation(StatesGroup):
     query = State()
+
+
+class OperationsLookup(StatesGroup):
+    code = State()

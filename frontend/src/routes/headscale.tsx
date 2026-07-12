@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, RefreshCw, Settings2, ShieldCheck, X, XCircle } from "lucide-react";
+import { AlertTriangle, RefreshCw, Search, Settings2, ShieldCheck, X, XCircle } from "lucide-react";
 import { Topbar } from "@/components/Topbar";
 import {
   approveHeadscaleNode,
@@ -44,12 +44,23 @@ type Filters = {
 
 const INITIAL_FILTERS: Filters = { approval: "", deviceType: "", online: "", linked: "" };
 
+function useDebounced(value: string, delay = 350) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delay);
+    return () => window.clearTimeout(timer);
+  }, [value, delay]);
+  return debounced;
+}
+
 function HeadscalePage() {
   const user = getStoredUser<User>();
   const isAdmin = user?.role === "admin";
   const [nodes, setNodes] = useState<HeadscaleNode[]>([]);
   const [stations, setStations] = useState<Station[]>([]);
   const [filters, setFilters] = useState<Filters>(INITIAL_FILTERS);
+  const [queryText, setQueryText] = useState("");
+  const query = useDebounced(queryText);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [selections, setSelections] = useState<Record<number, Selection>>({});
@@ -63,6 +74,7 @@ function HeadscalePage() {
     try {
       const [nodeRows, stationRows] = await Promise.all([
         getHeadscaleNodes({
+          q: query,
           approval_status: filters.approval || undefined,
           device_type: filters.deviceType || undefined,
           online: filters.online || undefined,
@@ -75,7 +87,7 @@ function HeadscalePage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Headscale inventory unavailable");
     }
-  }, [filters]);
+  }, [filters, query]);
 
   useEffect(() => {
     void load();
@@ -235,7 +247,16 @@ function HeadscalePage() {
           )}
         </div>
 
-        <div className="glass grid gap-3 rounded-xl p-4 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="glass grid gap-3 rounded-xl p-4 sm:grid-cols-2 xl:grid-cols-6">
+          <label className="relative self-end">
+            <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+            <input
+              value={queryText}
+              onChange={(event) => setQueryText(event.target.value)}
+              placeholder="Search node, VPN, or station"
+              className="h-9 w-full rounded border border-border bg-input pl-9 pr-3 text-sm"
+            />
+          </label>
           <Filter
             label="Approval"
             value={filters.approval}

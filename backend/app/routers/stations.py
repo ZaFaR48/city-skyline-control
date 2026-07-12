@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy import asc, desc, func, or_, select
+from sqlalchemy import String, asc, desc, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
@@ -80,11 +80,14 @@ async def list_stations(
             or_(
                 Station.station_code.ilike(like),
                 Station.name.ilike(like),
+                city.name.ilike(like),
                 district.name.ilike(like),
+                Station.operational_area.ilike(like),
                 Station.address.ilike(like),
                 Station.vpn_ip.ilike(like),
                 Station.local_ip.ilike(like),
                 node.hostname.ilike(like),
+                func.cast(node.id, String).ilike(like),
             )
         )
     if city_id is not None:

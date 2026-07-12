@@ -8,7 +8,7 @@ from math import asin, cos, radians, sin, sqrt
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
-from sqlalchemy import func, select
+from sqlalchemy import String, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -68,6 +68,7 @@ SUPPORTED_DISTRICT_CODES = {"ismoili-somoni", "shohmansur", "sino", "firdavsi"}
 @router.get("/stations", response_model=list[StationOut])
 async def station_approval_inventory(
     approval: str = "pending",
+    q: str | None = None,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_roles(Role.admin)),
 ):
@@ -87,6 +88,22 @@ async def station_approval_inventory(
         stmt = stmt.where(Station.approved_at.is_(None))
     elif approval == "approved":
         stmt = stmt.where(Station.approved_at.is_not(None))
+    if q and q.strip():
+        like = f"%{q.strip()}%"
+        node_match = select(HeadscaleNode.station_id).where(
+            or_(HeadscaleNode.hostname.ilike(like), func.cast(HeadscaleNode.id, String).ilike(like))
+        )
+        stmt = stmt.where(
+            or_(
+                Station.station_code.ilike(like),
+                Station.name.ilike(like),
+                Station.operational_area.ilike(like),
+                Station.address.ilike(like),
+                Station.vpn_ip.ilike(like),
+                OperationalRegion.name.ilike(like),
+                Station.id.in_(node_match),
+            )
+        )
     stations = (await db.execute(stmt.order_by(Station.station_code))).scalars().all()
     return await serialize_stations(db, list(stations))
 
@@ -257,6 +274,7 @@ async def apply_station_repair(
 @router.get("/station-inventory", response_model=list[StationOut])
 async def station_inventory(
     view: str = "all",
+    q: str | None = None,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_roles(Role.admin)),
 ):
@@ -284,6 +302,40 @@ async def station_inventory(
         rows = [row for row in rows if row.id in duplicate_ids]
     elif view == "data_quality":
         rows = [row for row in rows if row.data_quality_warnings]
+    if q and q.strip():
+        needle = q.strip().casefold()
+        matching_node_station_ids = set(
+            (
+                await db.execute(
+                    select(HeadscaleNode.station_id).where(
+                        HeadscaleNode.station_id.is_not(None),
+                        or_(
+                            HeadscaleNode.hostname.ilike(f"%{q.strip()}%"),
+                            func.cast(HeadscaleNode.id, String).ilike(f"%{q.strip()}%"),
+                        ),
+                    )
+                )
+            ).scalars().all()
+        )
+        rows = [
+            row
+            for row in rows
+            if row.id in matching_node_station_ids
+            or needle
+            in " ".join(
+                str(value or "")
+                for value in (
+                    row.station_code,
+                    row.name,
+                    row.city,
+                    row.district,
+                    row.operational_area,
+                    row.address,
+                    row.vpn_ip,
+                    row.headscale_hostname,
+                )
+            ).casefold()
+        ]
     return rows
 
 

@@ -415,9 +415,10 @@ export function currentLanguage(): Language {
 export function apiErrorMessage(language: Language, status: number, detail: string): string {
   if (status === 401) return translate(language, "api.unauthorized");
   if (status === 403) return translate(language, "api.forbidden");
+  if (status >= 500) return translate(language, "api.unavailable");
+  if (detail && !detail.startsWith("Request failed")) return detail;
   if (status === 404) return translate(language, "api.notFound");
   if (status === 409) return translate(language, "api.conflict");
-  if (status >= 500) return translate(language, "api.unavailable");
   return detail;
 }
 

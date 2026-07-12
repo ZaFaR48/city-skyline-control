@@ -1,6 +1,16 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Check, Copy, Download, ShieldCheck, Upload, Wrench, X } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  Copy,
+  Download,
+  Search,
+  ShieldCheck,
+  Upload,
+  Wrench,
+  X,
+} from "lucide-react";
 import { Topbar } from "@/components/Topbar";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
@@ -70,6 +80,15 @@ const INVENTORY_FILTERS = [
   "data_quality",
 ] as const;
 
+function useDebounced(value: string, delay = 350) {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebounced(value), delay);
+    return () => window.clearTimeout(timer);
+  }, [value, delay]);
+  return debounced;
+}
+
 function OnboardingPage() {
   const user = getStoredUser<User>();
   const [tab, setTab] = useState<Tab>("inventory");
@@ -121,7 +140,9 @@ function OnboardingPage() {
 
 function StationInventoryWorkflow() {
   const { district: districtName } = useI18n();
-  const [view, setView] = useState<(typeof INVENTORY_FILTERS)[number]>("all");
+  const [view, setView] = useState<(typeof INVENTORY_FILTERS)[number]>("pending");
+  const [queryText, setQueryText] = useState("");
+  const query = useDebounced(queryText);
   const [stations, setStations] = useState<Station[]>([]);
   const [nodes, setNodes] = useState<HeadscaleNode[]>([]);
   const [duplicates, setDuplicates] = useState<SuspectedDuplicatePair[]>([]);
@@ -138,7 +159,7 @@ function StationInventoryWorkflow() {
     setError(null);
     try {
       const [stationRows, nodeRows, duplicateRows] = await Promise.all([
-        getStationInventory(view),
+        getStationInventory(view, query),
         getHeadscaleNodes({ approval_status: "approved" }),
         getSuspectedDuplicates(),
       ]);
@@ -148,7 +169,7 @@ function StationInventoryWorkflow() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Station inventory unavailable");
     }
-  }, [view]);
+  }, [view, query]);
 
   useEffect(() => {
     void load();
@@ -219,6 +240,15 @@ function StationInventoryWorkflow() {
             </button>
           ))}
         </div>
+        <label className="relative mt-3 block max-w-xl">
+          <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+          <input
+            value={queryText}
+            onChange={(event) => setQueryText(event.target.value)}
+            placeholder="Search code, name, city, district, area, address, VPN, or Headscale node"
+            className="h-9 w-full rounded border border-border bg-input pl-9 pr-3 text-sm"
+          />
+        </label>
       </div>
       <div className="glass max-h-[620px] overflow-auto rounded-xl">
         <table className="w-full min-w-[1850px] text-sm">
@@ -704,6 +734,8 @@ function PublishStationDialog({
 function StationApprovalWorkflow() {
   const { district: districtName } = useI18n();
   const [filter, setFilter] = useState<"pending" | "approved" | "all">("pending");
+  const [queryText, setQueryText] = useState("");
+  const query = useDebounced(queryText);
   const [stations, setStations] = useState<Station[]>([]);
   const [preview, setPreview] = useState<StationApprovalPreview | null>(null);
   const [repairStation, setRepairStation] = useState<Station | null>(null);
@@ -713,11 +745,11 @@ function StationApprovalWorkflow() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      setStations(await getStationApprovalInventory(filter));
+      setStations(await getStationApprovalInventory(filter, query));
     } catch (err) {
       setError(err instanceof Error ? err.message : "Station approval inventory unavailable");
     }
-  }, [filter]);
+  }, [filter, query]);
   useEffect(() => {
     void load();
   }, [load]);
@@ -779,6 +811,15 @@ function StationApprovalWorkflow() {
             <option value="approved">Approved</option>
             <option value="all">All</option>
           </select>
+        </label>
+        <label className="relative min-w-72 flex-1">
+          <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+          <input
+            value={queryText}
+            onChange={(event) => setQueryText(event.target.value)}
+            placeholder="Search pending publication stations"
+            className="h-9 w-full rounded border border-border bg-input pl-9 pr-3 text-sm"
+          />
         </label>
       </div>
       <div className="glass rounded-xl overflow-x-auto max-h-[600px]">

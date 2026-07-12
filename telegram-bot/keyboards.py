@@ -16,6 +16,7 @@ def main_keyboard(lang: str = "tj", is_admin: bool = False) -> ReplyKeyboardMark
     rows = [
         ["register_station", "update_station"],
         ["search_station"],
+        ["station_summary"],
         ["scan_qr", "rustdesk"],
         ["vpn", "ping"],
         ["camera", "network_status"],

@@ -15,6 +15,7 @@ from app.routers.onboarding import (
     approve_station_for_production,
     preview_station_approval,
     preview_station_revocation,
+    station_approval_inventory,
     revoke_station_from_production,
 )
 from app.schemas import StationApprovalApplyIn
@@ -135,6 +136,8 @@ async def test_approval_accepts_approved_offline_station_node_and_writes_audit(d
     assert node.approval_status == "approved"
     audit = (await db.execute(select(AuditLog).where(AuditLog.action == "station.production_approve"))).scalar_one()
     assert audit.actor_user_id == admin.id
+    pending_rows = await station_approval_inventory("pending", None, db, admin)
+    assert station.id not in {row.id for row in pending_rows}
 
 
 @pytest.mark.asyncio
