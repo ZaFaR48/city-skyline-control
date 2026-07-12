@@ -92,6 +92,32 @@ class StationUpdate(BaseModel):
     is_archived: bool | None = None
 
 
+class StationHealthOut(BaseModel):
+    overall_status: StationStatus
+    overall_reason_code: str
+    overall_reason_text_key: str
+    observed_at: datetime | None
+    last_seen_at: datetime | None
+    current_state_started_at: datetime | None
+    current_state_duration_seconds: int | None
+    connectivity_status: str
+    headscale_status: str
+    agent_status: str
+    camera_status: str
+    internet_status: str
+    local_service_status: str
+    monitoring_coverage: str
+    evidence: dict[str, datetime | None]
+    current_event_id: int | None
+    linked_node_id: int | None
+
+
+class StationHealthDiagnosticOut(BaseModel):
+    station_id: int
+    station_code: str
+    health: StationHealthOut
+
+
 class StationOut(BaseModel):
     id: int
     station_code: str
@@ -133,6 +159,7 @@ class StationOut(BaseModel):
     cameras_online: int
     active_alerts: int
     data_quality_warnings: list[str] = Field(default_factory=list)
+    health: StationHealthOut
 
 
 class StationListOut(BaseModel):
@@ -348,10 +375,13 @@ class ReportStationRow(BaseModel):
     degraded_seconds: int
     unknown_seconds: int
     availability_percentage: float | None
+    data_coverage_percentage: float
     outages: int
     longest_outage_seconds: int
     average_outage_seconds: float | None
     current_outage_seconds: int | None
+    last_status_change_at: datetime | None
+    current_status: StationStatus
 
 
 class RegistrationUpsertIn(BaseModel):

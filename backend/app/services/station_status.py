@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import logging
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,19 +60,19 @@ class StationStatusResolver:
         if not station.vpn_ip or not node:
             station.consecutive_ping_failures = 0 if success else station.consecutive_ping_failures
             new_status = StationStatus.unknown.value
-            reason = "Monitoring not configured" if not station.vpn_ip else "No approved Headscale station node"
+            reason = "MONITORING_NOT_CONFIGURED"
         elif success:
             station.consecutive_ping_failures = 0
             station.last_seen_at = now
             if not node.online:
                 new_status = StationStatus.degraded.value
-                reason = "Ping succeeds while Headscale reports offline"
+                reason = "HEADSCALE_OFFLINE"
             elif latency_ms is not None and latency_ms > settings.DEGRADED_LATENCY_MS:
                 new_status = StationStatus.degraded.value
-                reason = f"Ping latency exceeds {settings.DEGRADED_LATENCY_MS} ms"
+                reason = f"PING_HIGH_LATENCY: {round(latency_ms)} ms"
             else:
                 new_status = StationStatus.online.value
-                reason = "Approved Headscale node and connectivity check are healthy"
+                reason = "HEALTHY"
         else:
             station.consecutive_ping_failures += 1
             node_stale = (
@@ -84,10 +85,10 @@ class StationStatusResolver:
             confirmed = station.consecutive_ping_failures >= settings.PING_FAIL_THRESHOLD or node_stale
             if confirmed:
                 new_status = StationStatus.offline.value
-                reason = error_type or f"Connectivity failed {station.consecutive_ping_failures} consecutive times"
+                reason = f"PING_TIMEOUT: {error_type or 'connectivity failure'}"
             else:
                 new_status = StationStatus.degraded.value
-                reason = error_type or f"Temporary connectivity failure {station.consecutive_ping_failures}/{settings.PING_FAIL_THRESHOLD}"
+                reason = f"PING_TIMEOUT: {error_type or 'temporary connectivity failure'} {station.consecutive_ping_failures}/{settings.PING_FAIL_THRESHOLD}"
 
         return await StationStatusResolver.transition(
             db,
@@ -114,6 +115,14 @@ class StationStatusResolver:
         previous = station.status or StationStatus.unknown.value
 
         if previous == status_value:
+            if station.status_reason != reason:
+                logging.getLogger(__name__).info(
+                    "station_status_reason_changed station_id=%s station_code=%s status=%s reason=%s",
+                    station.id,
+                    station.station_code,
+                    status_value,
+                    reason,
+                )
             station.status_reason = reason
             return StatusResolution(previous, status_value, False, reason)
 
@@ -141,6 +150,15 @@ class StationStatusResolver:
         )
         station.status = status_value
         station.status_reason = reason
+        logging.getLogger(__name__).info(
+            "station_status_transition station_id=%s station_code=%s previous=%s current=%s source=%s reason=%s",
+            station.id,
+            station.station_code,
+            previous,
+            status_value,
+            source_value,
+            reason,
+        )
 
         if status_value == StationStatus.offline.value:
             station.offline_since = station.offline_since or now
@@ -164,7 +182,7 @@ class StationStatusResolver:
                 )
         elif previous == StationStatus.offline.value:
             station.offline_since = None
-            if status_value == StationStatus.online.value:
+            if status_value in {StationStatus.online.value, StationStatus.degraded.value}:
                 active_alerts = (
                     await db.execute(
                         select(Alert).where(

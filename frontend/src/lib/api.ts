@@ -180,10 +180,57 @@ export const applyHeadscaleClassification = (
       confirmation,
     }),
   });
-export const getUptimeReport = (start: string, end: string, districtId?: number) =>
+export const getUptimeReport = (
+  start: string,
+  end: string,
+  districtId?: number,
+  stationId?: number,
+  status?: string,
+) =>
   apiFetch<UptimeReportRow[]>(
-    `/api/reports/uptime${query({ start, end, district_id: districtId })}`,
+    `/api/reports/uptime${query({ start, end, district_id: districtId, station_id: stationId, status })}`,
   );
+export async function downloadUptimeExport(
+  format: "csv" | "xlsx",
+  start: string,
+  end: string,
+  districtId?: number,
+  stationId?: number,
+  status?: string,
+): Promise<void> {
+  const token = getToken();
+  if (!token) throw new ApiError("Authentication required", 401);
+  const response = await fetch(
+    `${API_URL}/api/reports/uptime.${format}${query({ start, end, district_id: districtId, station_id: stationId, status })}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (response.status === 401) clearAuth();
+  if (!response.ok) {
+    let detail = `Export failed (${response.status})`;
+    try {
+      const body = await response.json();
+      if (typeof body.detail === "string") detail = body.detail;
+    } catch {
+      // The server did not return JSON.
+    }
+    throw new ApiError(
+      apiErrorMessage(currentLanguage(), response.status, detail),
+      response.status,
+    );
+  }
+  const blob = await response.blob();
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const filename =
+    disposition.match(/filename="?([^";]+)"?/i)?.[1] ?? `city-skyline-uptime.${format}`;
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
 export const getRegistrations = () => apiFetch<RegistrationRequest[]>("/api/registrations");
 export const getUsers = () => apiFetch<User[]>("/api/users");
 export const reviewRegistration = (id: number, action: string, role?: Role) =>

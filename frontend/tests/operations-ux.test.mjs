@@ -7,6 +7,12 @@ const headscale = readFileSync(new URL("../src/routes/headscale.tsx", import.met
 const i18n = readFileSync(new URL("../src/lib/i18n.tsx", import.meta.url), "utf8");
 const telegram = readFileSync(new URL("../src/routes/telegram.tsx", import.meta.url), "utf8");
 const root = readFileSync(new URL("../src/routes/__root.tsx", import.meta.url), "utf8");
+const analytics = readFileSync(new URL("../src/routes/analytics.tsx", import.meta.url), "utf8");
+const api = readFileSync(new URL("../src/lib/api.ts", import.meta.url), "utf8");
+const map = readFileSync(
+  new URL("../src/components/StationMap.client.tsx", import.meta.url),
+  "utf8",
+);
 
 test("onboarding inventory search is debounced and defaults to pending", () => {
   assert.match(onboarding, /useDebounced\(queryText\)/);
@@ -54,4 +60,23 @@ test("onboarding shows audited station actor and operator-created filter", () =>
   assert.match(onboarding, /operator_created/);
   assert.match(onboarding, /created_by_username/);
   assert.match(onboarding, /last_updated_by_username/);
+});
+
+test("map renders status-specific duration rows without online Offline dash contradiction", () => {
+  assert.match(map, /station\.status === "online"/);
+  assert.match(map, /Online for:/);
+  assert.match(map, /station\.status === "offline"/);
+  assert.doesNotMatch(map, /Offline:\s*\{station\.status/);
+  assert.match(map, /overall_reason_code/);
+});
+
+test("report export downloads a Blob with current filters and prevents double clicks", () => {
+  assert.match(api, /response\.blob\(\)/);
+  assert.match(api, /Content-Disposition/);
+  assert.match(api, /URL\.createObjectURL/);
+  assert.match(analytics, /if \(exporting\) return/);
+  assert.match(analytics, /disabled=\{loading \|\| exporting !== null\}/);
+  assert.match(analytics, /district \? Number\(district\)/);
+  assert.match(analytics, /station \? Number\(station\)/);
+  assert.match(analytics, /status \|\| undefined/);
 });

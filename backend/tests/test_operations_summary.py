@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy import func, select
 
-from app.models import AuditLog, OperationalRegion, Station
+from app.models import AuditLog, OperationalRegion, Station, StationStatusEvent
 from app.services.operations_summary import SUMMARY_ACTION, deliver_operations_summary, format_operations_summary
 
 
@@ -25,6 +25,7 @@ async def station(db, code="93401"):
         longitude=68.77,
         is_active=True,
         is_archived=False,
+        approved_at=datetime.now(timezone.utc),
     )
     db.add(row)
     await db.flush()
@@ -32,7 +33,7 @@ async def station(db, code="93401"):
 
 
 @pytest.mark.asyncio
-async def test_ten_minute_batch_groups_new_and_updated_station_details(db):
+async def test_ten_minute_batch_keeps_station_operations_concise(db):
     row = await station(db)
     events = [
         AuditLog(
@@ -55,10 +56,28 @@ async def test_ten_minute_batch_groups_new_and_updated_station_details(db):
     await db.flush()
     messages = await format_operations_summary(db, events)
     text = "\n".join(messages)
-    assert "Newly created stations" in text and "Updated stations" in text
+    assert "Амалиёти стансия" in text
     assert row.station_code in text and row.name in text
-    assert "Customs" in text and "Rudaki 10" in text
-    assert "Old address" in text and "100.64.10.1" in text
+    assert "Old address" in text
+    assert "Customs" not in text and "100.64.10.1" not in text
+
+
+@pytest.mark.asyncio
+async def test_ten_minute_summary_contains_only_meaningful_status_transitions(db):
+    row = await station(db, "93405")
+    transition = StationStatusEvent(
+        station_id=row.id,
+        previous_status="online",
+        new_status="offline",
+        source="ping",
+        reason="PING_TIMEOUT: unreachable",
+        started_at=datetime.now(timezone.utc),
+    )
+    db.add(transition)
+    await db.flush()
+    text = "\n".join(await format_operations_summary(db, [], [transition]))
+    assert "Хомӯш шуд" in text
+    assert "93405 — бо стансия алоқа нест" in text
 
 
 @pytest.mark.asyncio

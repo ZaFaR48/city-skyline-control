@@ -18,6 +18,7 @@ from ..models import (
     User,
 )
 from ..schemas import StationOut
+from .station_health import resolve_station_health_batch
 
 
 async def serialize_stations(
@@ -67,6 +68,7 @@ async def serialize_stations(
     camera_counts = {row[0]: (row[1], row[2]) for row in camera_rows}
     alert_counts = dict(alert_rows)
     node_by_station = {node.station_id: node for node in nodes}
+    health_by_station = await resolve_station_health_batch(db, stations)
     audit_rows = []
     if include_actor_attribution:
         audit_rows = list((
@@ -114,6 +116,7 @@ async def serialize_stations(
         )
         creator = created_by_station.get(station.id)
         updater = updated_by_station.get(station.id)
+        health = health_by_station[station.id]
         warnings = []
         district_name = regions[station.district_id].name if station.district_id else None
         normalized_name = station.name.casefold().removeprefix("н.").strip()
@@ -141,8 +144,8 @@ async def serialize_stations(
                 vpn_ip=station.vpn_ip,
                 local_ip=station.local_ip,
                 rustdesk_id=station.rustdesk_id,
-                status=station.status,
-                status_reason=station.status_reason,
+                status=health.overall_status,
+                status_reason=health.overall_reason_code,
                 last_seen_at=station.last_seen_at,
                 last_ping_at=station.last_ping_at,
                 last_ping_ms=station.last_ping_ms,
@@ -167,6 +170,7 @@ async def serialize_stations(
                 cameras_online=camera_online,
                 active_alerts=alert_counts.get(station.id, 0),
                 data_quality_warnings=warnings,
+                health=health.model_values(),
             )
         )
     return output

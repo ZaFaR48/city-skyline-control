@@ -23,16 +23,39 @@ from ..models import (
     StationStatusEvent,
     User,
 )
-from ..schemas import StationCreate, StationDetailOut, StationListOut, StationOut, StationUpdate
+from ..schemas import StationCreate, StationDetailOut, StationHealthDiagnosticOut, StationListOut, StationOut, StationUpdate
 from ..services.audit import add_audit
 from ..services.ping_monitor import ping_station
 from ..services.station_views import serialize_stations
 from ..services.station_permissions import enforce_station_create_policy, enforce_station_update_policy
 from ..services.operator_activity import add_activity_event, touch_presence
 from ..services.station_visibility import production_station_filter
+from ..services.station_health import resolve_station_health_batch
 
 
 router = APIRouter()
+
+
+@router.get("/health/diagnostics", response_model=list[StationHealthDiagnosticOut])
+async def station_health_diagnostics(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(Role.admin)),
+):
+    stations = list((await db.execute(
+        select(Station)
+        .join(OperationalRegion, Station.city_id == OperationalRegion.id)
+        .where(OperationalRegion.code == "dushanbe", production_station_filter())
+        .order_by(Station.station_code)
+    )).scalars().all())
+    health = await resolve_station_health_batch(db, stations)
+    return [
+        StationHealthDiagnosticOut(
+            station_id=station.id,
+            station_code=station.station_code,
+            health=health[station.id].model_values(),
+        )
+        for station in stations
+    ]
 
 
 @router.get("", response_model=StationListOut)

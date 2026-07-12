@@ -19,6 +19,7 @@ from ..models import (
 )
 from ..schemas import AttentionStation, DashboardSummaryOut, DistrictHealth
 from .station_visibility import production_station_filter
+from .station_health import resolve_station_health_batch
 
 
 PILOT_DISTRICT_CODES = ("ismoili-somoni", "shohmansur", "sino", "firdavsi")
@@ -37,7 +38,8 @@ async def build_dashboard_summary(db: AsyncSession) -> DashboardSummaryOut:
         )
     ).scalars().all()
     station_ids = [station.id for station in stations]
-    statuses = Counter(station.status for station in stations)
+    health_by_station = await resolve_station_health_batch(db, list(stations))
+    statuses = Counter(health_by_station[station.id].overall_status for station in stations)
     total = len(stations)
 
     camera_total = 0
@@ -103,7 +105,7 @@ async def build_dashboard_summary(db: AsyncSession) -> DashboardSummaryOut:
     district_health = []
     for district in districts:
         district_stations = [station for station in stations if station.district_id == district.id]
-        counts = Counter(station.status for station in district_stations)
+        counts = Counter(health_by_station[station.id].overall_status for station in district_stations)
         district_total = len(district_stations)
         district_health.append(
             DistrictHealth(
@@ -135,15 +137,12 @@ async def build_dashboard_summary(db: AsyncSession) -> DashboardSummaryOut:
     now = datetime.now(timezone.utc)
 
     def problem_score(station: Station) -> tuple[float, int, int, int, int]:
-        offline_seconds = (
-            (now - station.offline_since).total_seconds()
-            if station.status == StationStatus.offline.value and station.offline_since
-            else 0
-        )
+        health = health_by_station[station.id]
+        offline_seconds = health.current_state_duration_seconds or 0 if health.overall_status == StationStatus.offline.value else 0
         return (
             offline_seconds,
             alerts_by_station.get(station.id, 0),
-            1 if station.status == StationStatus.degraded.value else 0,
+            1 if health.overall_status == StationStatus.degraded.value else 0,
             station.last_ping_ms or -1,
             camera_failures.get(station.id, 0),
         )
@@ -151,7 +150,7 @@ async def build_dashboard_summary(db: AsyncSession) -> DashboardSummaryOut:
     problem_stations = [
         station
         for station in stations
-        if station.status != StationStatus.online.value
+        if health_by_station[station.id].overall_status != StationStatus.online.value
         or alerts_by_station.get(station.id, 0)
         or camera_failures.get(station.id, 0)
     ]
@@ -162,11 +161,15 @@ async def build_dashboard_summary(db: AsyncSession) -> DashboardSummaryOut:
             station_code=station.station_code,
             name=station.name,
             district=station.district.name if station.district else None,
-            status=station.status,
+            status=health_by_station[station.id].overall_status,
             vpn_ip=station.vpn_ip,
             last_ping_ms=station.last_ping_ms,
             last_seen_at=station.last_seen_at,
-            offline_since=station.offline_since,
+            offline_since=(
+                health_by_station[station.id].current_state_started_at
+                if health_by_station[station.id].overall_status == StationStatus.offline.value
+                else None
+            ),
             active_alerts=alerts_by_station.get(station.id, 0),
         )
         for station in problem_stations[:10]

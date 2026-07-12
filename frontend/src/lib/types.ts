@@ -70,6 +70,27 @@ export interface Station {
   cameras_online: number;
   active_alerts: number;
   data_quality_warnings: string[];
+  health: StationHealth;
+}
+
+export interface StationHealth {
+  overall_status: StationStatus;
+  overall_reason_code: string;
+  overall_reason_text_key: string;
+  observed_at: string | null;
+  last_seen_at: string | null;
+  current_state_started_at: string | null;
+  current_state_duration_seconds: number | null;
+  connectivity_status: string;
+  headscale_status: string;
+  agent_status: string;
+  camera_status: string;
+  internet_status: string;
+  local_service_status: string;
+  monitoring_coverage: string;
+  evidence: Record<string, string | null>;
+  current_event_id: number | null;
+  linked_node_id: number | null;
 }
 
 export interface StationList {
@@ -251,10 +272,13 @@ export interface UptimeReportRow {
   degraded_seconds: number;
   unknown_seconds: number;
   availability_percentage: number | null;
+  data_coverage_percentage: number;
   outages: number;
   longest_outage_seconds: number;
   average_outage_seconds: number | null;
   current_outage_seconds: number | null;
+  last_status_change_at: string | null;
+  current_status: StationStatus;
 }
 
 export interface RegistrationRequest {

@@ -37,3 +37,19 @@ test("operator presence and activity labels have Russian and Tajik translations"
     assert.ok(i18n.includes(`"${label}"`));
   }
 });
+
+test("map health and report export labels have Russian and Tajik translations", () => {
+  for (const label of [
+    "Uptime Reports",
+    "Measured uptime",
+    "Data coverage",
+    "Download CSV",
+    "Download XLSX",
+    "Online for:",
+    "Offline since:",
+    "Station online, camera offline",
+    "Exact cause is not determined",
+  ]) {
+    assert.ok(i18n.includes(`"${label}"`));
+  }
+});

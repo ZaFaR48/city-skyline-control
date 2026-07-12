@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime, timezone
+import logging
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from ..models import OperationalRegion, Station, StationStatus, StationStatusEvent
 from ..schemas import ReportStationRow
 from .station_visibility import production_station_filter
+from .station_health import resolve_station_health_batch
 
 
 async def build_uptime_report(
@@ -22,6 +24,15 @@ async def build_uptime_report(
     status: str | None = None,
     source: str | None = None,
 ) -> list[ReportStationRow]:
+    logging.getLogger(__name__).info(
+        "uptime_report_generation start=%s end=%s station_id=%s district_id=%s status=%s source=%s",
+        start,
+        end,
+        station_id,
+        district_id,
+        status,
+        source,
+    )
     now = datetime.now(timezone.utc)
     end = min(end, now)
     if start >= end:
@@ -36,9 +47,10 @@ async def build_uptime_report(
         station_stmt = station_stmt.where(Station.id == station_id)
     if district_id:
         station_stmt = station_stmt.where(Station.district_id == district_id)
-    if status:
-        station_stmt = station_stmt.where(Station.status == status)
     stations = (await db.execute(station_stmt.order_by(Station.station_code))).scalars().all()
+    health_by_station = await resolve_station_health_batch(db, list(stations), now=end)
+    if status:
+        stations = [station for station in stations if health_by_station[station.id].overall_status == status]
     if not stations:
         return []
 
@@ -59,23 +71,36 @@ async def build_uptime_report(
     for station in stations:
         durations = defaultdict(int)
         outages = []
+        cursor = start
         for event in grouped[station.id]:
-            segment_start = max(start, event.started_at)
+            segment_start = max(start, event.started_at, cursor)
             segment_end = min(end, event.ended_at or end)
             seconds = max(0, int((segment_end - segment_start).total_seconds()))
-            durations[event.new_status] += seconds
-            if event.new_status == StationStatus.offline.value and seconds:
-                outages.append(seconds)
+            if seconds:
+                status_value = event.new_status if event.new_status in {
+                    StationStatus.online.value,
+                    StationStatus.offline.value,
+                    StationStatus.degraded.value,
+                    StationStatus.unknown.value,
+                } else StationStatus.unknown.value
+                durations[status_value] += seconds
+                if status_value == StationStatus.offline.value:
+                    outages.append(seconds)
+                cursor = max(cursor, segment_end)
         known = sum(durations[value] for value in (
             StationStatus.online.value,
             StationStatus.offline.value,
             StationStatus.degraded.value,
         ))
         unknown = max(0, total_seconds - known)
+        durations[StationStatus.unknown.value] = unknown
         availability = round(durations[StationStatus.online.value] * 100 / known, 2) if known else None
+        coverage = round(known * 100 / total_seconds, 2) if total_seconds else 0.0
+        health = health_by_station[station.id]
         current_outage = None
-        if station.status == StationStatus.offline.value and station.offline_since:
-            current_outage = max(0, int((end - max(start, station.offline_since)).total_seconds()))
+        if health.overall_status == StationStatus.offline.value and health.current_state_started_at:
+            current_outage = max(0, int((end - max(start, health.current_state_started_at)).total_seconds()))
+        last_change = max((event.started_at for event in grouped[station.id]), default=None)
         rows.append(
             ReportStationRow(
                 station_id=station.id,
@@ -88,10 +113,13 @@ async def build_uptime_report(
                 degraded_seconds=durations[StationStatus.degraded.value],
                 unknown_seconds=unknown,
                 availability_percentage=availability,
+                data_coverage_percentage=coverage,
                 outages=len(outages),
                 longest_outage_seconds=max(outages, default=0),
                 average_outage_seconds=round(sum(outages) / len(outages), 2) if outages else None,
                 current_outage_seconds=current_outage,
+                last_status_change_at=last_change,
+                current_status=health.overall_status,
             )
         )
     return rows
