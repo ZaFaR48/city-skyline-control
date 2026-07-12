@@ -129,6 +129,24 @@ async def test_telegram_operator_creation_summary_has_safe_actor_identity(db):
 
 
 @pytest.mark.asyncio
+async def test_summary_escapes_visible_audit_values(db):
+    row = await station(db, "93410")
+    event = AuditLog(
+        action="station.update",
+        entity_type="station",
+        entity_id=str(row.id),
+        before_data={"address": "Old <place>"},
+        after_data={"address": "New & safe"},
+        timestamp=datetime.now(timezone.utc),
+    )
+    db.add(event)
+    await db.flush()
+    text = "\n".join(await format_operations_summary(db, [event], language="en"))
+    assert "Old &lt;place&gt;" in text and "New &amp; safe" in text
+    assert "Old <place>" not in text
+
+
+@pytest.mark.asyncio
 async def test_failed_delivery_does_not_advance_cursor(db):
     row = await station(db, "93403")
     db.add(AuditLog(

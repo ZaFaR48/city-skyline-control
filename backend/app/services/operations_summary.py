@@ -548,8 +548,20 @@ def _diff_text(before: dict, after: dict, language: str) -> str:
     for key in sorted((set(before) | set(after)) & SUMMARY_SAFE_DIFF_FIELDS):
         old, new = before.get(key), after.get(key)
         if old != new:
-            changes.append(f"{labels[key]}: {old if old not in (None, '') else '—'} → {new if new not in (None, '') else '—'}")
+            changes.append(f"{labels[key]}: {_diff_value(old, language)} → {_diff_value(new, language)}")
     return f" ({'; '.join(changes[:6])})" if changes else ""
+
+
+def _diff_value(value: object, language: str) -> str:
+    if value in (None, ""):
+        return "—"
+    if isinstance(value, bool):
+        return {
+            "tj": "ҳа" if value else "не",
+            "ru": "да" if value else "нет",
+            "en": "yes" if value else "no",
+        }.get(language, "ҳа" if value else "не")
+    return escape(str(value))
 
 
 def _chunk_lines(lines: list[str], limit: int = 3900) -> list[str]:
