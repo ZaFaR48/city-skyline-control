@@ -15,6 +15,7 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { Sidebar } from "@/components/Sidebar";
 import { isAuthenticated } from "@/lib/auth";
 import { I18nProvider } from "@/lib/i18n";
+import { sendPresenceHeartbeat } from "@/lib/api";
 
 function NotFoundComponent() {
   return (
@@ -129,6 +130,22 @@ function RootComponent() {
       navigate({ to: "/login" });
     }
   }, [navigate, isPublicPage]);
+
+  useEffect(() => {
+    if (isPublicPage || !isAuthenticated() || typeof document === "undefined") return;
+    const heartbeat = () => {
+      if (document.visibilityState === "visible" && isAuthenticated()) {
+        void sendPresenceHeartbeat().catch(() => undefined);
+      }
+    };
+    heartbeat();
+    const timer = window.setInterval(heartbeat, 60_000);
+    document.addEventListener("visibilitychange", heartbeat);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", heartbeat);
+    };
+  }, [isPublicPage]);
 
   return (
     <I18nProvider>

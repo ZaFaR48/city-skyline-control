@@ -36,6 +36,11 @@ SECTION_TITLES = {
     "lifecycle": "🗄 Archived / restored stations",
     "headscale": "🌐 Headscale operations",
 }
+SUMMARY_SAFE_DIFF_FIELDS = {
+    "station_code", "name", "city_id", "district_id", "operational_area", "address",
+    "latitude", "longitude", "vpn_ip", "local_ip", "is_active", "is_archived",
+    "approval_status", "device_type", "station_id",
+}
 
 
 async def deliver_operations_summary(
@@ -142,12 +147,21 @@ def _event_text(event: AuditLog, station: Station | None, node: HeadscaleNode | 
         gps = f"{station.latitude:.6f}, {station.longitude:.6f}" if station.latitude is not None and station.longitude is not None else "—"
         approval = "approved" if station.approved_at else "pending"
         linked = f"#{node.id} {node.hostname}" if node else "—"
+        actor = ""
+        if event.action == "station.create" and event.source == AuditSource.telegram.value:
+            values = event.after_data or {}
+            display_name = escape(str(values.get("operator_display_name") or values.get("operator_username") or "—"))
+            username = escape(str(values.get("operator_username") or "—"))
+            telegram_username = values.get("telegram_username")
+            telegram_id = escape(str(values.get("telegram_user_id") or "—"))
+            telegram_label = f"@{escape(str(telegram_username))}" if telegram_username else "—"
+            actor = f"\n  added by: {display_name} · {username} · {telegram_label} · Telegram ID {telegram_id}"
         return (
             f"• <b>{escape(station.station_code)}</b> · {escape(station.name)}\n"
             f"  {escape(station.city.name)} / {escape(station.district.name if station.district else '—')} · "
             f"area: {escape(station.operational_area or '—')} · address: {escape(station.address or '—')}\n"
             f"  VPN: {escape(station.vpn_ip or '—')} · Local: {escape(station.local_ip or '—')} · GPS: {escape(gps)}\n"
-            f"  approval: {approval} · Headscale: {escape(linked)} · change: {escape(event.action)}{diff}"
+            f"  approval: {approval} · Headscale: {escape(linked)} · change: {escape(event.action)}{diff}{actor}"
         )
     node_label = f"#{node.id} {node.hostname}" if node else f"node {event.entity_id or '—'}"
     return f"• {escape(node_label)} · {escape(event.action)}{diff}"
@@ -155,7 +169,7 @@ def _event_text(event: AuditLog, station: Station | None, node: HeadscaleNode | 
 
 def _diff_text(before: dict, after: dict) -> str:
     changes = []
-    for key in sorted(set(before) | set(after)):
+    for key in sorted((set(before) | set(after)) & SUMMARY_SAFE_DIFF_FIELDS):
         old, new = before.get(key), after.get(key)
         if old != new:
             changes.append(f"{key}: {old or '—'} → {new or '—'}")

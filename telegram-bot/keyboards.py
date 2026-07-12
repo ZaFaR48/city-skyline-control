@@ -12,20 +12,23 @@ def language_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
-def main_keyboard(lang: str = "tj", is_admin: bool = False) -> ReplyKeyboardMarkup:
-    rows = [
-        ["register_station", "update_station"],
-        ["search_station"],
-        ["station_summary"],
-        ["scan_qr", "rustdesk"],
-        ["vpn", "ping"],
-        ["camera", "network_status"],
-        ["alerts", "reports"],
-        ["settings"],
+def main_keyboard(lang: str = "tj", is_admin: bool = False, role: str | None = None) -> ReplyKeyboardMarkup:
+    current_role = role or ("admin" if is_admin else "viewer")
+    read_only = [
+        ["search_station"], ["station_summary"], ["district_stations"],
+        ["station_status"], ["alerts"], ["my_access"],
     ]
-    if is_admin:
-        rows.append(["pending_users"])
-    rows.extend([["my_access", "request_access"], ["help_access"]])
+    if current_role == "operator":
+        rows = [["register_station"], ["update_station"], *read_only]
+    elif current_role == "admin":
+        rows = [
+            ["register_station", "update_station"], ["search_station", "station_summary"],
+            ["district_stations", "station_status"], ["scan_qr", "rustdesk"], ["vpn", "ping"],
+            ["camera", "network_status"], ["alerts", "reports"], ["settings"], ["pending_users"],
+            ["my_access", "request_access"], ["help_access"],
+        ]
+    else:
+        rows = read_only
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=t(lang, key) if key in {"pending_users", "my_access", "request_access", "help_access"} else menu_label(lang, key)) for key in row]

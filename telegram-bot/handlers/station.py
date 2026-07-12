@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+from types import SimpleNamespace
+from uuid import uuid4
 
 from aiogram import F, Router
 from aiogram.filters import StateFilter
@@ -9,6 +11,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from api import BackendAPIError, api
+from authorization import require_telegram_roles
 from i18n import all_menu_labels, all_texts, t
 from keyboards import location_keyboard, main_keyboard, navigation_keyboard, wizard_inline
 from states import RegisterStation, UpdateStation
@@ -45,11 +48,43 @@ async def _finish(state: FSMContext) -> None:
     await state.update_data(lang=lang)
 
 
-async def _start(state: FSMContext, mode: str) -> str:
-    lang = await _lang(state)
+async def _start(state: FSMContext, mode: str, user) -> str:
+    previous = await state.get_data()
+    lang = previous.get("lang", "tj")
     await state.clear()
-    await state.update_data(lang=lang, mode=mode, nonce=secrets.token_hex(4), version=0, saving=False)
+    workflow_id = str(uuid4())
+    await state.update_data(
+        lang=lang,
+        mode=mode,
+        nonce=secrets.token_hex(4),
+        version=0,
+        saving=False,
+        workflow_id=workflow_id,
+        correlation_id=secrets.token_hex(12),
+        telegram_user_id=user.id,
+        telegram_username=user.username,
+        role=previous.get("role"),
+        user_id=previous.get("user_id"),
+    )
     return lang
+
+
+def _actor(data: dict):
+    return SimpleNamespace(id=data["telegram_user_id"], username=data.get("telegram_username"))
+
+
+async def _track(state: FSMContext, action: str, step: str, *, status: str = "in_progress", **extra) -> None:
+    data = await state.get_data()
+    if not data.get("workflow_id"):
+        return
+    try:
+        await api.station_workflow_event(
+            _actor(data),
+            data["workflow_id"],
+            {"action": action, "status": status, "current_step": step, **extra},
+        )
+    except BackendAPIError:
+        pass
 
 
 def _cb(data: dict, action: str, value: str = "-") -> str:
@@ -82,21 +117,57 @@ async def _prompt(message: Message, state: FSMContext, text: str, *, reply_marku
 @router.message(StateFilter(RegisterStation, UpdateStation), lambda message: message.text in all_texts("cancel"))
 async def cancel_station(message: Message, state: FSMContext) -> None:
     lang = await _lang(state)
+    role = (await state.get_data()).get("role")
+    await _track(state, "telegram.station_workflow.cancelled", "cancelled", status="cancelled")
     await state.clear()
-    await message.answer(t(lang, "cancelled"), reply_markup=main_keyboard(lang))
+    await message.answer(t(lang, "cancelled"), reply_markup=main_keyboard(lang, role=role))
 
 
 @router.message(lambda message: message.text in all_menu_labels("register_station"))
 async def register_start(message: Message, state: FSMContext) -> None:
-    lang = await _start(state, "create")
+    if not await require_telegram_roles(message, state, "admin", "operator"):
+        await message.answer(t(await _lang(state), "ops_denied"))
+        return
+    lang = await _start(state, "create", message.from_user)
     await state.set_state(RegisterStation.code)
+    data = await state.get_data()
+    try:
+        await api.start_station_workflow(
+            message.from_user,
+            workflow_id=data["workflow_id"],
+            workflow_type="registration",
+            station_code=None,
+            current_step="station_code",
+            correlation_id=data["correlation_id"],
+        )
+    except BackendAPIError as exc:
+        await state.clear()
+        await message.answer(f"{t(lang, 'api_error')} {exc.message}")
+        return
     await _prompt(message, state, t(lang, "register_code"), reply_markup=navigation_keyboard(lang))
 
 
 @router.message(lambda message: message.text in all_menu_labels("update_station"))
 async def update_start(message: Message, state: FSMContext) -> None:
-    lang = await _start(state, "update")
+    if not await require_telegram_roles(message, state, "admin", "operator"):
+        await message.answer(t(await _lang(state), "ops_denied"))
+        return
+    lang = await _start(state, "update", message.from_user)
     await state.set_state(UpdateStation.code)
+    data = await state.get_data()
+    try:
+        await api.start_station_workflow(
+            message.from_user,
+            workflow_id=data["workflow_id"],
+            workflow_type="update",
+            station_code=None,
+            current_step="station_code",
+            correlation_id=data["correlation_id"],
+        )
+    except BackendAPIError as exc:
+        await state.clear()
+        await message.answer(f"{t(lang, 'api_error')} {exc.message}")
+        return
     await _prompt(message, state, t(lang, "update_code"), reply_markup=navigation_keyboard(lang))
 
 
@@ -108,6 +179,7 @@ async def register_code(message: Message, state: FSMContext) -> None:
         lang = await _lang(state)
         code = normalize_station_code(message.text)
         if not is_valid_station_code(code):
+            await _track(state, "telegram.validation_failed", "station_code", failure_reason="invalid station code")
             await message.answer(t(lang, "invalid_station_code"))
             return
         try:
@@ -116,9 +188,11 @@ async def register_code(message: Message, state: FSMContext) -> None:
             await message.answer(f"{t(lang, 'api_error')} {exc.message}")
             return
         await state.update_data(code=code)
+        await _track(state, "telegram.station_field.changed", "station_code", station_code=code, changed_fields=["station_code"], after_data={"station_code": code})
         if existing:
             await state.update_data(existing=existing, existing_station_id=existing["id"])
             data = await _advance(state, RegisterStation.existing_offer)
+            await _track(state, "telegram.duplicate_station.detected", "existing_station", station_id=existing["id"], station_code=code)
             await _prompt(
                 message,
                 state,
@@ -140,6 +214,7 @@ async def update_code(message: Message, state: FSMContext) -> None:
         lang = await _lang(state)
         code = normalize_station_code(message.text)
         if not is_valid_station_code(code):
+            await _track(state, "telegram.validation_failed", "station_code", failure_reason="invalid station code")
             await message.answer(t(lang, "invalid_station_code"))
             return
         try:
@@ -148,9 +223,11 @@ async def update_code(message: Message, state: FSMContext) -> None:
             await message.answer(f"{t(lang, 'api_error')} {exc.message}")
             return
         if not existing:
+            await _track(state, "telegram.validation_failed", "station_code", failure_reason="station not found")
             await message.answer(t(lang, "update_not_found"))
             return
         await state.update_data(code=code, existing=existing, existing_station_id=existing["id"])
+        await _track(state, "telegram.station_update.started", "field_selection", station_id=existing["id"], station_code=code)
         await _show_update_menu(message, state, lang)
 
 
@@ -168,9 +245,18 @@ async def station_callback(callback: CallbackQuery, state: FSMContext) -> None:
             return
         action, value = parts[3], parts[4]
         if action == "cancel":
+            role = data.get("role")
+            await _track(state, "telegram.station_workflow.cancelled", "cancelled", status="cancelled")
             await state.clear()
-            await callback.message.answer(t(lang, "cancelled"), reply_markup=main_keyboard(lang))
-        elif action == "open_update" and await state.get_state() == RegisterStation.existing_offer.state:
+            await callback.message.answer(t(lang, "cancelled"), reply_markup=main_keyboard(lang, role=role))
+            await callback.answer()
+            return
+        if not await require_telegram_roles(callback, state, "admin", "operator"):
+            await _track(state, "telegram.permission_denied", "authorization", status="failed", failure_reason="role changed")
+            await state.clear()
+            await callback.answer(t(lang, "ops_denied"), show_alert=True)
+            return
+        if action == "open_update" and await state.get_state() == RegisterStation.existing_offer.state:
             await state.update_data(mode="update")
             await _show_update_menu(callback.message, state, lang)
         elif action == "create_city" and await state.get_state() == RegisterStation.city.state:
@@ -179,12 +265,14 @@ async def station_callback(callback: CallbackQuery, state: FSMContext) -> None:
                 await callback.message.answer(t(lang, "register_code"), reply_markup=navigation_keyboard(lang))
             else:
                 await state.update_data(city_code="dushanbe", city_name="Dushanbe")
+                await _track(state, "telegram.station_field.changed", "city", changed_fields=["city_id"])
                 await _show_create_district(callback.message, state, lang)
         elif action == "create_district" and await state.get_state() == RegisterStation.district.state:
             if value == "back":
                 await _show_create_city(callback.message, state, lang)
             elif value in DISTRICTS:
                 await state.update_data(district_code=value, district_name=DISTRICTS[value])
+                await _track(state, "telegram.station_field.changed", "district", changed_fields=["district_id"])
                 await _prompt_create_text(callback.message, state, lang, RegisterStation.operational_area, 4, "area_prompt", allow_skip=True)
         elif action == "create_save" and await state.get_state() == RegisterStation.confirm.state:
             if value == "back":
@@ -251,9 +339,11 @@ async def register_area(message: Message, state: FSMContext) -> None:
         if value in all_texts("skip_now"):
             value = None
         elif not value:
+            await _track(state, "telegram.validation_failed", "operational_area", failure_reason="required value missing")
             await message.answer(t(lang, "invalid_required"))
             return
         await state.update_data(operational_area=value)
+        await _track(state, "telegram.station_field.changed", "operational_area", changed_fields=["operational_area"], after_data={"operational_area": value})
         await _prompt_create_text(message, state, lang, RegisterStation.address, 5, "address_prompt")
 
 
@@ -265,9 +355,11 @@ async def register_address(message: Message, state: FSMContext) -> None:
         lang = await _lang(state)
         value = clean_text(message.text)
         if not value:
+            await _track(state, "telegram.validation_failed", "address", failure_reason="required value missing")
             await message.answer(t(lang, "invalid_required"))
             return
         await state.update_data(address=value)
+        await _track(state, "telegram.station_field.changed", "address", changed_fields=["address"], after_data={"address": value})
         await _prompt_create_text(message, state, lang, RegisterStation.name, 6, "name_prompt")
 
 
@@ -279,9 +371,11 @@ async def register_name(message: Message, state: FSMContext) -> None:
         lang = await _lang(state)
         value = clean_text(message.text)
         if not value:
+            await _track(state, "telegram.validation_failed", "name", failure_reason="required value missing")
             await message.answer(t(lang, "invalid_required"))
             return
         await state.update_data(name=value)
+        await _track(state, "telegram.station_field.changed", "name", changed_fields=["name"], after_data={"name": value})
         await _prompt_create_gps(message, state, lang)
 
 
@@ -298,9 +392,11 @@ async def register_gps(message: Message, state: FSMContext) -> None:
         lang = await _lang(state)
         if message.location:
             await state.update_data(latitude=message.location.latitude, longitude=message.location.longitude)
+            await _track(state, "telegram.station_field.changed", "gps", changed_fields=["latitude", "longitude"], after_data={"latitude": message.location.latitude, "longitude": message.location.longitude})
         elif clean_text(message.text) in all_texts("skip_now"):
             await state.update_data(latitude=None, longitude=None)
         else:
+            await _track(state, "telegram.validation_failed", "gps", failure_reason="invalid location input")
             await message.answer(t(lang, "invalid_location"), reply_markup=location_keyboard(lang))
             return
         await _show_create_confirm(message, state, lang)
@@ -308,6 +404,7 @@ async def register_gps(message: Message, state: FSMContext) -> None:
 
 async def _show_create_confirm(message: Message, state: FSMContext, lang: str) -> None:
     data = await _advance(state, RegisterStation.confirm)
+    await _track(state, "telegram.station_preview.generated", "confirmation", station_code=data.get("code"))
     await _prompt(
         message,
         state,
@@ -327,7 +424,8 @@ async def _show_update_menu(message: Message, state: FSMContext, lang: str) -> N
         [(t(lang, "field_name"), _cb(data, "update_field", "name")), (t(lang, "field_gps"), _cb(data, "update_field", "gps"))],
         [(t(lang, "cancel"), _cb(data, "cancel"))],
     ]
-    await _prompt(message, state, f"{_current_station(lang, data['existing'])}\n\n{t(lang, 'update_fields')}", reply_markup=wizard_inline(rows))
+    production_warning = f"\n\n{t(lang, 'approved_update_warning')}" if data["existing"].get("approved_at") else ""
+    await _prompt(message, state, f"{_current_station(lang, data['existing'])}{production_warning}\n\n{t(lang, 'update_fields')}", reply_markup=wizard_inline(rows))
 
 
 async def _select_update_field(message: Message, state: FSMContext, lang: str, field: str) -> None:
@@ -397,6 +495,16 @@ async def _show_update_confirm(message: Message, state: FSMContext, lang: str, p
     diffs = [(field, current.get(field), value) for field, value in patch.items() if current.get(field) != value]
     await state.update_data(patch=patch, diffs=diffs)
     data = await _advance(state, UpdateStation.confirm)
+    await _track(
+        state,
+        "telegram.station_preview.generated",
+        "confirmation",
+        station_id=data.get("existing_station_id", current.get("id")),
+        station_code=data.get("code", current.get("station_code")),
+        changed_fields=list(patch),
+        before_data={field: current.get(field) for field in patch},
+        after_data=patch,
+    )
     rows = [t(lang, "diff_title")]
     rows.extend(f"{field}: {_value(old)} → {_value(new)}" for field, old, new in diffs)
     if not diffs:
@@ -409,32 +517,46 @@ async def _show_update_confirm(message: Message, state: FSMContext, lang: str, p
 
 async def _save_update(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
     data = await state.get_data()
+    role = data.get("role")
     if data.get("saving"):
         await callback.answer(t(lang, "saving"), show_alert=True)
         return
     await state.update_data(saving=True)
+    if not await require_telegram_roles(callback, state, "admin", "operator"):
+        await state.update_data(saving=False)
+        await callback.answer(t(lang, "ops_denied"), show_alert=True)
+        return
     try:
         current = await api.station_by_code(data["code"])
         if not current or current.get("id") != data["existing_station_id"]:
             raise BackendAPIError("Station changed; restart the update", 409)
         patch = {field: value for field, value in (data.get("patch") or {}).items() if current.get(field) != value}
         if patch:
-            current = await api.update_station(current["id"], patch)
+            await _track(state, "telegram.station_save.confirmed", "save", station_id=current["id"], station_code=data["code"], changed_fields=list(patch))
+            current = await api.update_station_as_telegram_user(callback.from_user, data["workflow_id"], current["id"], patch)
+        else:
+            await _track(state, "telegram.station_update.completed", "completed", status="completed", station_id=current["id"], station_code=data["code"])
     except BackendAPIError as exc:
+        await _track(state, "telegram.validation_failed", "save", failure_reason=exc.message)
         await state.update_data(saving=False)
         await callback.answer(exc.message, show_alert=True)
         return
     await _finish(state)
-    await callback.message.answer(t(lang, "field_saved"), reply_markup=main_keyboard(lang))
+    await callback.message.answer(t(lang, "field_saved"), reply_markup=main_keyboard(lang, role=role))
     await callback.answer()
 
 
 async def _save_create(callback: CallbackQuery, state: FSMContext, lang: str) -> None:
     data = await state.get_data()
+    role = data.get("role")
     if data.get("saving"):
         await callback.answer(t(lang, "saving"), show_alert=True)
         return
     await state.update_data(saving=True)
+    if not await require_telegram_roles(callback, state, "admin", "operator"):
+        await state.update_data(saving=False)
+        await callback.answer(t(lang, "ops_denied"), show_alert=True)
+        return
     try:
         if await api.station_by_code(data["code"]):
             raise BackendAPIError("Station code already exists; creation stopped", 409)
@@ -443,13 +565,19 @@ async def _save_create(callback: CallbackQuery, state: FSMContext, lang: str) ->
         district = next((item for item in regions if item.get("code") == data["district_code"]), None)
         if not city or not district:
             raise BackendAPIError("Canonical region data is unavailable", 409)
-        await api.create_station(_build_create(data, city["id"], district["id"]))
+        await _track(state, "telegram.station_save.confirmed", "save", station_code=data["code"])
+        await api.create_station_as_telegram_user(
+            callback.from_user,
+            data["workflow_id"],
+            _build_create(data, city["id"], district["id"]),
+        )
     except BackendAPIError as exc:
+        await _track(state, "telegram.validation_failed", "save", failure_reason=exc.message)
         await state.update_data(saving=False)
         await callback.answer(exc.message, show_alert=True)
         return
     await _finish(state)
-    await callback.message.answer(t(lang, "saved_new_pending"), reply_markup=main_keyboard(lang))
+    await callback.message.answer(t(lang, "registered_pending").format(code=data["code"]), reply_markup=main_keyboard(lang, role=role))
     await callback.answer()
 
 

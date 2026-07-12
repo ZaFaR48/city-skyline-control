@@ -58,6 +58,10 @@ export interface Station {
   is_archived: boolean;
   approved_at: string | null;
   approved_by: number | null;
+  created_by_username: string | null;
+  created_by_role: Role | null;
+  last_updated_by_username: string | null;
+  last_updated_by_role: Role | null;
   monitoring_configured: boolean;
   headscale_linked: boolean;
   headscale_hostname: string | null;
@@ -359,6 +363,46 @@ export interface PasswordResetPreview {
   valid: boolean;
   errors: string[];
   preview_token: string | null;
+}
+
+export interface OperatorPresence {
+  user_id: number;
+  display_name: string;
+  username: string;
+  telegram_username: string | null;
+  telegram_user_id: number | null;
+  role: Role;
+  presence: "online" | "recently_active" | "offline";
+  last_activity_at: string | null;
+  last_activity_source: string | null;
+  current_workflow_state: string | null;
+}
+
+export interface OperatorActivity {
+  id: number;
+  workflow_id: string | null;
+  actor_user_id: number;
+  actor_username: string;
+  actor_display_name: string;
+  actor_role: Role;
+  telegram_user_id: number | null;
+  telegram_username: string | null;
+  source: string;
+  station_id: number | null;
+  station_code: string | null;
+  action: string;
+  workflow_status: string | null;
+  current_step: string | null;
+  started_at: string | null;
+  last_activity_at: string | null;
+  completed_at: string | null;
+  duration_seconds: number | null;
+  changed_fields: string[];
+  before_data: Record<string, unknown> | null;
+  after_data: Record<string, unknown> | null;
+  failure_reason: string | null;
+  correlation_id: string | null;
+  timestamp: string;
 }
 
 export interface DistrictAssignment {

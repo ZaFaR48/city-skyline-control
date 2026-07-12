@@ -35,12 +35,13 @@ fallback_router = Router()
 async def menu_placeholder(message: Message, state: FSMContext) -> None:
     data = await state.get_data()
     lang = data.get("lang", "tj")
-    await message.answer(t(lang, "not_implemented"), reply_markup=main_keyboard(lang))
+    await message.answer(t(lang, "not_implemented"), reply_markup=main_keyboard(lang, role=data.get("role")))
 
 
 def build_dispatcher() -> Dispatcher:
     dp = Dispatcher()
     dp.message.outer_middleware(AccessMiddleware())
+    dp.callback_query.outer_middleware(AccessMiddleware())
     dp.include_router(start_router)
     dp.include_router(language_router)
     dp.include_router(station_router)

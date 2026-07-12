@@ -30,6 +30,10 @@ class Settings(BaseSettings):
     PUBLIC_WEB_URL: str = "http://13.140.180.178:3002"
 
     CORS_ORIGINS: str = "http://localhost:5173"
+    PRESENCE_ONLINE_MINUTES: int = 5
+    PRESENCE_RECENT_MINUTES: int = 30
+    PRESENCE_WRITE_THROTTLE_SECONDS: int = 45
+    TELEGRAM_WORKFLOW_ABANDON_MINUTES: int = 30
 
 
 settings = Settings()

@@ -14,6 +14,8 @@ import type {
   HeadscaleNode,
   Region,
   PasswordResetPreview,
+  OperatorActivity,
+  OperatorPresence,
   RegistrationRequest,
   Role,
   Station,
@@ -105,6 +107,15 @@ export async function login(username: string, password: string): Promise<LoginRe
 }
 
 export const getDashboardSummary = () => apiFetch<DashboardSummary>("/api/dashboard/summary");
+export const sendPresenceHeartbeat = () =>
+  apiFetch<{ last_activity_at: string; source: string; write_performed: boolean }>(
+    "/api/activity/heartbeat",
+    { method: "POST" },
+  );
+export const getOperatorPresence = (params: Record<string, string | undefined> = {}) =>
+  apiFetch<OperatorPresence[]>(`/api/activity/admin/presence${query(params)}`);
+export const getOperatorActivity = (params: Record<string, string | undefined> = {}) =>
+  apiFetch<OperatorActivity[]>(`/api/activity/admin/events${query(params)}`);
 export const getRegions = (active?: boolean) =>
   apiFetch<Region[]>(`/api/regions${query({ active })}`);
 export const getStations = (

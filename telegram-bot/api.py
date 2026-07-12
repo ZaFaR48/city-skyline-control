@@ -108,6 +108,71 @@ class BackendAPI:
         )
         return list(data or [])
 
+    @staticmethod
+    def telegram_actor(user: Any) -> dict[str, Any]:
+        return {
+            "telegram_user_id": user.id,
+            "telegram_username": user.username,
+        }
+
+    async def resolve_telegram_user(self, user: Any) -> dict[str, Any]:
+        data = await self._request("POST", "/api/activity/telegram/resolve", json=self.telegram_actor(user))
+        return dict(data or {})
+
+    async def start_station_workflow(
+        self,
+        user: Any,
+        *,
+        workflow_id: str,
+        workflow_type: str,
+        station_code: str | None,
+        current_step: str,
+        correlation_id: str,
+    ) -> dict[str, Any]:
+        data = await self._request(
+            "POST",
+            "/api/activity/telegram/workflows/start",
+            json={
+                **self.telegram_actor(user),
+                "workflow_id": workflow_id,
+                "workflow_type": workflow_type,
+                "station_code": station_code,
+                "current_step": current_step,
+                "correlation_id": correlation_id,
+            },
+        )
+        return dict(data or {})
+
+    async def station_workflow_event(self, user: Any, workflow_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        data = await self._request(
+            "POST",
+            f"/api/activity/telegram/workflows/{workflow_id}/event",
+            json={**self.telegram_actor(user), **payload},
+        )
+        return dict(data or {})
+
+    async def create_station_as_telegram_user(self, user: Any, workflow_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        data = await self._request(
+            "POST",
+            "/api/activity/telegram/stations",
+            json={**self.telegram_actor(user), "workflow_id": workflow_id, **payload},
+        )
+        return dict(data or {})
+
+    async def update_station_as_telegram_user(
+        self,
+        user: Any,
+        workflow_id: str,
+        station_id: int,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        data = await self._request(
+            "PATCH",
+            f"/api/activity/telegram/stations/{station_id}",
+            json={**self.telegram_actor(user), "workflow_id": workflow_id, **payload},
+        )
+        return dict(data or {})
+
     async def create_camera(self, payload: dict[str, Any]) -> dict[str, Any]:
         data = await self._request("POST", "/api/cameras", json=payload)
         return dict(data or {})

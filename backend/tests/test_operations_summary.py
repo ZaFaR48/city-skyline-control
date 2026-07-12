@@ -85,6 +85,31 @@ async def test_batch_delivery_is_persistent_and_idempotent(db):
 
 
 @pytest.mark.asyncio
+async def test_telegram_operator_creation_summary_has_safe_actor_identity(db):
+    row = await station(db, "93404")
+    event = AuditLog(
+        action="station.create",
+        entity_type="station",
+        entity_id=str(row.id),
+        source="telegram",
+        after_data={
+            "operator_display_name": "Zafar Operator",
+            "operator_username": "zafar_operator",
+            "telegram_username": "zafar_tg",
+            "telegram_user_id": 123456,
+            "password": "must-not-appear",
+            "access_token": "must-not-appear",
+        },
+        timestamp=datetime.now(timezone.utc),
+    )
+    db.add(event)
+    await db.flush()
+    text = "\n".join(await format_operations_summary(db, [event]))
+    assert "Zafar Operator" in text and "zafar_operator" in text and "123456" in text
+    assert "must-not-appear" not in text and "password" not in text and "access_token" not in text
+
+
+@pytest.mark.asyncio
 async def test_failed_delivery_does_not_advance_cursor(db):
     row = await station(db, "93403")
     db.add(AuditLog(

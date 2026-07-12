@@ -24,10 +24,9 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     status = result.get("status")
     await state.update_data(access_status=status, role=result.get("role"))
     if status == "activated":
-        is_admin = result.get("role") == "admin"
         await message.answer(
             f"Welcome, {result.get('username') or message.from_user.first_name}.",
-            reply_markup=main_keyboard("tj", is_admin=is_admin),
+            reply_markup=main_keyboard("tj", role=result.get("role")),
         )
         return
     if status == "approved" and result.get("activation_code"):
@@ -136,10 +135,10 @@ async def _is_admin(message: Message, user=None) -> bool:
     if telegram_user is None:
         return False
     try:
-        result = await api.registration_start(telegram_user)
+        result = await api.resolve_telegram_user(telegram_user)
     except BackendAPIError:
         return False
-    return result.get("status") == "activated" and result.get("role") == "admin"
+    return result.get("is_active") and result.get("role") == "admin"
 
 
 def _access_text(lang: str, result: dict) -> str:

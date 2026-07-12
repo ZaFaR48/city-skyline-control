@@ -24,3 +24,16 @@ test("internal role and district values remain canonical", () => {
     assert.ok(onboarding.includes(`"${district}"`));
   }
 });
+
+test("operator presence and activity labels have Russian and Tajik translations", () => {
+  for (const label of [
+    "Operator Activity",
+    "Application presence",
+    "Recently active",
+    "All workflow states",
+    "From (Dushanbe)",
+    "City Skyline activity, not Telegram presence",
+  ]) {
+    assert.ok(i18n.includes(`"${label}"`));
+  }
+});

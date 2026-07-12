@@ -114,6 +114,8 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    last_activity_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
 
 class OperationalRegion(Base):
@@ -358,6 +360,67 @@ class TelegramIdentity(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class TelegramStationWorkflow(Base):
+    __tablename__ = "telegram_station_workflows"
+    __table_args__ = (
+        Index("ix_telegram_workflow_actor", "actor_user_id"),
+        Index("ix_telegram_workflow_status_activity", "status", "last_activity_at"),
+        Index("ix_telegram_workflow_station", "station_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    actor_role: Mapped[str] = mapped_column(String(16))
+    telegram_user_id: Mapped[int] = mapped_column(BigInteger)
+    telegram_username: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    workflow_type: Mapped[str] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(16), default="in_progress")
+    station_id: Mapped[int | None] = mapped_column(ForeignKey("stations.id", ondelete="SET NULL"), nullable=True)
+    station_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    current_step: Mapped[str] = mapped_column(String(64))
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_activity_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    changed_fields: Mapped[list[str]] = mapped_column(JSON, default=list)
+    before_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    after_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    correlation_id: Mapped[str] = mapped_column(String(64), index=True)
+
+
+class OperatorActivityEvent(Base):
+    __tablename__ = "operator_activity_events"
+    __table_args__ = (
+        Index("ix_operator_activity_actor", "actor_user_id"),
+        Index("ix_operator_activity_action", "action"),
+        Index("ix_operator_activity_station", "station_id"),
+        Index("ix_operator_activity_timestamp", "timestamp"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    workflow_id: Mapped[str | None] = mapped_column(ForeignKey("telegram_station_workflows.id", ondelete="SET NULL"), nullable=True)
+    actor_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"))
+    actor_role: Mapped[str] = mapped_column(String(16))
+    telegram_user_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    telegram_username: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source: Mapped[str] = mapped_column(String(16))
+    station_id: Mapped[int | None] = mapped_column(ForeignKey("stations.id", ondelete="SET NULL"), nullable=True)
+    station_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    action: Mapped[str] = mapped_column(String(128))
+    workflow_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    current_step: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_activity_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    changed_fields: Mapped[list[str]] = mapped_column(JSON, default=list)
+    before_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    after_data: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    correlation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class UserActivationToken(Base):

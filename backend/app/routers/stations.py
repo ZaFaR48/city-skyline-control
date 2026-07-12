@@ -27,6 +27,8 @@ from ..schemas import StationCreate, StationDetailOut, StationListOut, StationOu
 from ..services.audit import add_audit
 from ..services.ping_monitor import ping_station
 from ..services.station_views import serialize_stations
+from ..services.station_permissions import enforce_station_create_policy, enforce_station_update_policy
+from ..services.operator_activity import add_activity_event, touch_presence
 from ..services.station_visibility import production_station_filter
 
 
@@ -137,8 +139,10 @@ async def create_station(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(require_roles(Role.admin, Role.operator)),
 ):
+    values = data.model_dump()
+    enforce_station_create_policy(user, values)
     await _validate_regions(db, data.city_id, data.district_id)
-    station = Station(**data.model_dump())
+    station = Station(**values, is_active=True, is_archived=False, approved_at=None, approved_by=None)
     db.add(station)
     try:
         await db.flush()
@@ -154,6 +158,18 @@ async def create_station(
         after={"station_code": station.station_code, "name": station.name, "city_id": station.city_id, "district_id": station.district_id},
         request=request,
     )
+    add_activity_event(
+        db,
+        user=user,
+        action="station.created",
+        source="api",
+        station_id=station.id,
+        station_code=station.station_code,
+        status="completed",
+        changed_fields=["station_code", "name", "city_id", "district_id", "operational_area", "address", "latitude", "longitude"],
+        after=values,
+    )
+    await touch_presence(db, user, "api")
     await db.commit()
     station = await _load_station(db, station.id)
     return (await serialize_stations(db, [station]))[0]
@@ -216,6 +232,7 @@ async def update_station(
 ):
     station = await _load_station(db, station_id)
     changes = data.model_dump(exclude_unset=True)
+    enforce_station_update_policy(user, changes)
     city_id = changes.get("city_id", station.city_id)
     district_id = changes.get("district_id", station.district_id)
     await _validate_regions(db, city_id, district_id)
@@ -244,6 +261,19 @@ async def update_station(
         after=changes,
         request=request,
     )
+    add_activity_event(
+        db,
+        user=user,
+        action="station.updated",
+        source="api",
+        station_id=station.id,
+        station_code=station.station_code,
+        status="completed",
+        changed_fields=sorted(changes),
+        before=before,
+        after=changes,
+    )
+    await touch_presence(db, user, "api")
     await db.commit()
     station = await _load_station(db, station_id)
     return (await serialize_stations(db, [station]))[0]

@@ -278,7 +278,7 @@ async def station_inventory(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_roles(Role.admin)),
 ):
-    allowed = {"all", "pending", "approved", "archived", "missing_headscale", "suspected_duplicate", "data_quality"}
+    allowed = {"all", "pending", "approved", "archived", "missing_headscale", "suspected_duplicate", "data_quality", "operator_created"}
     if view not in allowed:
         raise HTTPException(422, "Unknown station inventory filter")
     stations = list((await db.execute(
@@ -302,6 +302,8 @@ async def station_inventory(
         rows = [row for row in rows if row.id in duplicate_ids]
     elif view == "data_quality":
         rows = [row for row in rows if row.data_quality_warnings]
+    elif view == "operator_created":
+        rows = [row for row in rows if row.created_by_role == Role.operator]
     if q and q.strip():
         needle = q.strip().casefold()
         matching_node_station_ids = set(

@@ -4,6 +4,7 @@ from .config import settings
 from .services.ping_monitor import ping_all_stations
 from .services.headscale import sync_headscale_nodes
 from .services.operations_summary import run_operations_summary_job
+from .services.operator_activity import abandon_inactive_workflows
 
 
 def start_scheduler() -> AsyncIOScheduler:
@@ -15,6 +16,14 @@ def start_scheduler() -> AsyncIOScheduler:
         "interval",
         minutes=10,
         id="telegram_operations_summary",
+        max_instances=1,
+        coalesce=True,
+    )
+    sched.add_job(
+        abandon_inactive_workflows,
+        "interval",
+        minutes=5,
+        id="abandon_telegram_workflows",
         max_instances=1,
         coalesce=True,
     )

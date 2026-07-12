@@ -23,9 +23,10 @@ async def _lang(state: FSMContext) -> str:
 @router.message(StateFilter(SearchStation), lambda message: message.text in all_texts("cancel"))
 async def cancel_search(message: Message, state: FSMContext) -> None:
     lang = await _lang(state)
+    role = (await state.get_data()).get("role")
     await state.clear()
     await state.update_data(lang=lang)
-    await message.answer(t(lang, "cancelled"), reply_markup=main_keyboard(lang))
+    await message.answer(t(lang, "cancelled"), reply_markup=main_keyboard(lang, role=role))
 
 
 @router.message(lambda message: message.text in all_menu_labels("search_station"))
@@ -38,6 +39,7 @@ async def search_start(message: Message, state: FSMContext) -> None:
 @router.message(SearchStation.query)
 async def search_query(message: Message, state: FSMContext) -> None:
     lang = await _lang(state)
+    role = (await state.get_data()).get("role")
     query = clean_text(message.text)
     if not query:
         await message.answer(t(lang, "search_empty"))
@@ -46,7 +48,7 @@ async def search_query(message: Message, state: FSMContext) -> None:
     try:
         rows = await api.search_stations(query)
     except BackendAPIError as exc:
-        await message.answer(f"{t(lang, 'api_error')} {exc.message}", reply_markup=main_keyboard(lang))
+        await message.answer(f"{t(lang, 'api_error')} {exc.message}", reply_markup=main_keyboard(lang, role=role))
         await state.clear()
         await state.update_data(lang=lang)
         return
@@ -55,7 +57,7 @@ async def search_query(message: Message, state: FSMContext) -> None:
     await state.update_data(lang=lang)
 
     if not rows:
-        await message.answer(t(lang, "search_no_results"), reply_markup=main_keyboard(lang))
+        await message.answer(t(lang, "search_no_results"), reply_markup=main_keyboard(lang, role=role))
         return
 
     lines = [t(lang, "search_results"), ""]
@@ -71,4 +73,4 @@ async def search_query(message: Message, state: FSMContext) -> None:
         )
         lines.append("")
 
-    await message.answer("\n".join(lines).strip(), reply_markup=main_keyboard(lang))
+    await message.answer("\n".join(lines).strip(), reply_markup=main_keyboard(lang, role=role))

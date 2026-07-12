@@ -61,12 +61,12 @@ def station(**overrides):
 
 
 async def activated(_user):
-    return {"status": "activated", "role": "operator"}
+    return {"user_id": 1, "username": "operator", "is_active": True, "role": "operator"}
 
 
 @pytest.mark.asyncio
 async def test_exact_station_lookup_returns_full_details(monkeypatch):
-    monkeypatch.setattr("handlers.operations.api.registration_start", activated)
+    monkeypatch.setattr("handlers.operations.api.resolve_telegram_user", activated)
 
     async def rows(view, query=None):
         assert view == "all" and query == "10042"
@@ -111,12 +111,12 @@ def test_station_summary_localizes_labels():
 
 
 @pytest.mark.asyncio
-async def test_viewer_is_denied_operational_summaries(monkeypatch):
+async def test_viewer_can_use_read_only_operational_summaries(monkeypatch):
     async def viewer(_user):
-        return {"status": "activated", "role": "viewer"}
+        return {"user_id": 2, "username": "viewer", "is_active": True, "role": "viewer"}
 
-    monkeypatch.setattr("handlers.operations.api.registration_start", viewer)
+    monkeypatch.setattr("handlers.operations.api.resolve_telegram_user", viewer)
     state = FakeState({"lang": "en"})
     message = FakeMessage("📋 Station summaries")
     await operations_menu(message, state)
-    assert "only to administrators and operators" in message.answers[0][0]
+    assert "Station operations" in message.answers[0][0]

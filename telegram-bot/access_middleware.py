@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware
-from aiogram.types import Message, TelegramObject
+from aiogram.types import CallbackQuery, Message, TelegramObject
 
 from api import BackendAPIError, api
 from i18n import all_texts
@@ -19,18 +19,24 @@ class AccessMiddleware(BaseMiddleware):
         event: TelegramObject,
         data: dict[str, Any],
     ) -> Any:
-        if not isinstance(event, Message) or event.from_user is None:
+        if not isinstance(event, (Message, CallbackQuery)) or event.from_user is None:
             return await handler(event, data)
-        text = (event.text or "").strip()
-        if text.startswith(("/start", "/status", "/access", "/help")) or text in PUBLIC_TEXT:
+        text = (event.text or "").strip() if isinstance(event, Message) else ""
+        if isinstance(event, Message) and (text.startswith(("/start", "/status", "/access", "/help")) or text in PUBLIC_TEXT):
             return await handler(event, data)
         try:
-            registration = await api.registration_start(event.from_user)
+            registration = await api.resolve_telegram_user(event.from_user)
         except BackendAPIError:
-            await event.answer("Registration service is temporarily unavailable. Please try again later.")
+            if isinstance(event, CallbackQuery):
+                await event.answer("Access is not active. Use /start or My access.", show_alert=True)
+            else:
+                await event.answer("Access is not active. Use /start or My access.")
             return None
-        if registration.get("status") != "activated":
-            await event.answer("Access is not active. Use /start or My status.")
+        if not registration.get("is_active"):
+            if isinstance(event, CallbackQuery):
+                await event.answer("Access is not active.", show_alert=True)
+            else:
+                await event.answer("Access is not active.")
             return None
         state = data.get("state")
         if state:

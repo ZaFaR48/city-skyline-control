@@ -78,6 +78,7 @@ const INVENTORY_FILTERS = [
   "missing_headscale",
   "suspected_duplicate",
   "data_quality",
+  "operator_created",
 ] as const;
 
 function useDebounced(value: string, delay = 350) {
@@ -251,7 +252,7 @@ function StationInventoryWorkflow() {
         </label>
       </div>
       <div className="glass max-h-[620px] overflow-auto rounded-xl">
-        <table className="w-full min-w-[1850px] text-sm">
+        <table className="w-full min-w-[2050px] text-sm">
           <thead className="sticky top-0 bg-panel text-left text-xs uppercase text-muted-foreground">
             <tr>
               <th className="p-3">Code</th>
@@ -265,6 +266,8 @@ function StationInventoryWorkflow() {
               <th>Headscale node</th>
               <th>Approval</th>
               <th>Record state</th>
+              <th>Created by</th>
+              <th>Last updated by</th>
               <th>Actions</th>
             </tr>
           </thead>
@@ -285,6 +288,16 @@ function StationInventoryWorkflow() {
                 <td>{station.approved_at ? "Production approved" : "Pending"}</td>
                 <td>
                   {station.is_archived ? "Archived" : station.is_active ? "Active" : "Inactive"}
+                </td>
+                <td>
+                  {station.created_by_username
+                    ? `${station.created_by_username} (${station.created_by_role})`
+                    : "—"}
+                </td>
+                <td>
+                  {station.last_updated_by_username
+                    ? `${station.last_updated_by_username} (${station.last_updated_by_role})`
+                    : "—"}
                 </td>
                 <td className="p-3">
                   <div className="flex flex-wrap gap-2">

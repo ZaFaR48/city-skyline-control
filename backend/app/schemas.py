@@ -121,6 +121,10 @@ class StationOut(BaseModel):
     is_archived: bool
     approved_at: datetime | None
     approved_by: int | None
+    created_by_username: str | None = None
+    created_by_role: Role | None = None
+    last_updated_by_username: str | None = None
+    last_updated_by_role: Role | None = None
     monitoring_configured: bool
     headscale_linked: bool
     headscale_hostname: str | None
@@ -664,6 +668,107 @@ class DuplicateAlertApplyIn(BaseModel):
     alert_type: AlertType
     preview_token: str
     confirmation: Literal["RESOLVE DUPLICATES"]
+
+
+class TelegramActorIn(BaseModel):
+    telegram_user_id: int
+    telegram_username: str | None = Field(default=None, max_length=64)
+
+
+class TelegramRoleOut(BaseModel):
+    user_id: int
+    username: str
+    role: Role
+    is_active: bool
+
+
+class PresenceHeartbeatOut(BaseModel):
+    last_activity_at: datetime
+    source: str
+    write_performed: bool
+
+
+class TelegramWorkflowStartIn(TelegramActorIn):
+    workflow_id: str = Field(min_length=8, max_length=36)
+    workflow_type: Literal["registration", "update"]
+    station_code: str | None = Field(default=None, max_length=32)
+    current_step: str = Field(max_length=64)
+    correlation_id: str = Field(min_length=8, max_length=64)
+
+
+class TelegramWorkflowEventIn(TelegramActorIn):
+    action: str = Field(max_length=128)
+    status: Literal["in_progress", "completed", "cancelled", "failed"]
+    current_step: str = Field(max_length=64)
+    station_id: int | None = None
+    station_code: str | None = Field(default=None, max_length=32)
+    changed_fields: list[str] = Field(default_factory=list, max_length=16)
+    before_data: dict[str, Any] | None = None
+    after_data: dict[str, Any] | None = None
+    failure_reason: str | None = Field(default=None, max_length=255)
+
+
+class TelegramStationCreateIn(TelegramActorIn):
+    workflow_id: str = Field(min_length=8, max_length=36)
+    station_code: str = Field(min_length=1, max_length=32)
+    name: str = Field(min_length=1, max_length=128)
+    city_id: int
+    district_id: int | None = None
+    operational_area: str | None = Field(default=None, max_length=128)
+    address: str = Field(default="", max_length=255)
+    latitude: float | None = None
+    longitude: float | None = None
+
+
+class TelegramStationUpdateIn(TelegramActorIn):
+    workflow_id: str = Field(min_length=8, max_length=36)
+    city_id: int | None = None
+    district_id: int | None = None
+    operational_area: str | None = Field(default=None, max_length=128)
+    address: str | None = Field(default=None, max_length=255)
+    name: str | None = Field(default=None, min_length=1, max_length=128)
+    latitude: float | None = None
+    longitude: float | None = None
+
+
+class OperatorPresenceOut(BaseModel):
+    user_id: int
+    display_name: str
+    username: str
+    telegram_username: str | None
+    telegram_user_id: int | None
+    role: Role
+    presence: Literal["online", "recently_active", "offline"]
+    last_activity_at: datetime | None
+    last_activity_source: str | None
+    current_workflow_state: str | None
+
+
+class OperatorActivityOut(ORMModel):
+    id: int
+    workflow_id: str | None
+    actor_user_id: int
+    actor_username: str
+    actor_display_name: str
+    actor_role: Role
+    telegram_user_id: int | None
+    telegram_username: str | None
+    source: str
+    station_id: int | None
+    station_code: str | None
+    action: str
+    workflow_status: str | None
+    current_step: str | None
+    started_at: datetime | None
+    last_activity_at: datetime | None
+    completed_at: datetime | None
+    duration_seconds: int | None
+    changed_fields: list[str]
+    before_data: dict[str, Any] | None
+    after_data: dict[str, Any] | None
+    failure_reason: str | None
+    correlation_id: str | None
+    timestamp: datetime
 
 
 StationDetailOut.model_rebuild()

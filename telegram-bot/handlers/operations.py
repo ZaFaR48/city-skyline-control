@@ -6,6 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from api import BackendAPIError, api
+from authorization import require_telegram_roles
 from i18n import all_menu_labels, t
 from keyboards import main_keyboard, wizard_inline
 from states import OperationsLookup
@@ -26,16 +27,12 @@ async def _lang(state: FSMContext) -> str:
 
 
 async def _authorized(user, state: FSMContext) -> bool:
-    if user is None:
-        return False
-    try:
-        registration = await api.registration_start(user)
-    except BackendAPIError:
-        return False
-    allowed = registration.get("status") == "activated" and registration.get("role") in {"admin", "operator"}
-    if allowed:
-        await state.update_data(role=registration.get("role"), access_status="activated")
-    return allowed
+    return bool(await require_telegram_roles(SimpleEvent(user), state, "admin", "operator", "viewer"))
+
+
+class SimpleEvent:
+    def __init__(self, user):
+        self.from_user = user
 
 
 @router.message(Command("stations"))
@@ -54,6 +51,24 @@ async def operations_menu(message: Message, state: FSMContext) -> None:
             [(t(lang, "ops_state"), "ops:state")],
         ]),
     )
+
+
+@router.message(lambda message: message.text in all_menu_labels("district_stations"))
+async def district_menu_action(message: Message, state: FSMContext) -> None:
+    lang = await _lang(state)
+    if not await _authorized(message.from_user, state):
+        await message.answer(t(lang, "ops_denied"))
+        return
+    await _district_menu(message, lang)
+
+
+@router.message(lambda message: message.text in all_menu_labels("station_status"))
+async def state_menu_action(message: Message, state: FSMContext) -> None:
+    lang = await _lang(state)
+    if not await _authorized(message.from_user, state):
+        await message.answer(t(lang, "ops_denied"))
+        return
+    await _state_menu(message, lang)
 
 
 @router.message(Command("station"))
@@ -186,13 +201,14 @@ async def _send_view(message: Message, state: FSMContext, view: str, *, active_o
 
 async def _send_rows(message: Message, state: FSMContext, rows: list[dict]) -> None:
     lang = await _lang(state)
+    role = (await state.get_data()).get("role")
     await state.set_state(None)
     if not rows:
-        await message.answer(t(lang, "ops_empty"), reply_markup=main_keyboard(lang))
+        await message.answer(t(lang, "ops_empty"), reply_markup=main_keyboard(lang, role=role))
         return
     for chunk in chunk_station_messages(rows, lang):
         await message.answer(chunk)
-    await message.answer(t(lang, "main_menu"), reply_markup=main_keyboard(lang))
+    await message.answer(t(lang, "main_menu"), reply_markup=main_keyboard(lang, role=role))
 
 
 def format_station_summary(station: dict, lang: str) -> str:

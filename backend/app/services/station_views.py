@@ -8,12 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models import (
     Alert,
     ApprovalStatus,
+    AuditLog,
     Camera,
     DeviceType,
     HeadscaleNode,
     OperationalRegion,
     Station,
     StationStatus,
+    User,
 )
 from ..schemas import StationOut
 
@@ -60,6 +62,37 @@ async def serialize_stations(db: AsyncSession, stations: list[Station]) -> list[
     camera_counts = {row[0]: (row[1], row[2]) for row in camera_rows}
     alert_counts = dict(alert_rows)
     node_by_station = {node.station_id: node for node in nodes}
+    audit_rows = (
+        await db.execute(
+            select(AuditLog)
+            .where(
+                AuditLog.entity_type == "station",
+                AuditLog.entity_id.in_([str(station_id) for station_id in ids]),
+                AuditLog.action.in_(("station.create", "station.update")),
+            )
+            .order_by(AuditLog.timestamp, AuditLog.id)
+        )
+    ).scalars().all()
+    actor_ids = {row.actor_user_id for row in audit_rows if row.actor_user_id is not None}
+    actors = {
+        user.id: user
+        for user in (
+            await db.execute(select(User).where(User.id.in_(actor_ids)))
+        ).scalars().all()
+    } if actor_ids else {}
+    created_by_station: dict[int, User] = {}
+    updated_by_station: dict[int, User] = {}
+    for row in audit_rows:
+        try:
+            station_id = int(row.entity_id or "")
+        except ValueError:
+            continue
+        actor = actors.get(row.actor_user_id)
+        if not actor:
+            continue
+        if row.action == "station.create":
+            created_by_station.setdefault(station_id, actor)
+        updated_by_station[station_id] = actor
 
     output = []
     for station in stations:
@@ -72,6 +105,8 @@ async def serialize_stations(db: AsyncSession, stations: list[Station]) -> list[
             and node.device_type == DeviceType.station.value
             else None
         )
+        creator = created_by_station.get(station.id)
+        updater = updated_by_station.get(station.id)
         warnings = []
         district_name = regions[station.district_id].name if station.district_id else None
         normalized_name = station.name.casefold().removeprefix("н.").strip()
@@ -113,6 +148,10 @@ async def serialize_stations(db: AsyncSession, stations: list[Station]) -> list[
                 is_archived=station.is_archived,
                 approved_at=station.approved_at,
                 approved_by=station.approved_by,
+                created_by_username=creator.username if creator else None,
+                created_by_role=creator.role if creator else None,
+                last_updated_by_username=updater.username if updater else None,
+                last_updated_by_role=updater.role if updater else None,
                 monitoring_configured=bool(station.vpn_ip and monitoring_node),
                 headscale_linked=monitoring_node is not None,
                 headscale_hostname=node.hostname if node else None,

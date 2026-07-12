@@ -70,6 +70,8 @@ async def test_operator_write_and_viewer_read_only(role, allowed):
         ("operator", "GET", "/api/users", None),
         ("operator", "PATCH", "/api/users/1/role", {"role": "viewer"}),
         ("operator", "GET", "/api/audit", None),
+        ("operator", "GET", "/api/activity/admin/presence", None),
+        ("viewer", "GET", "/api/activity/admin/events", None),
         ("operator", "GET", "/api/onboarding/districts/stations", None),
         ("operator", "GET", "/api/onboarding/stations", None),
         ("operator", "POST", "/api/onboarding/stations/1/approval-preview", None),

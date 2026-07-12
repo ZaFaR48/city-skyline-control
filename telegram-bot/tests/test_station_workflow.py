@@ -47,6 +47,7 @@ class FakeMessage:
         self.text = text
         self.location = location
         self.chat = SimpleNamespace(id=chat_id)
+        self.from_user = SimpleNamespace(id=10, username="operator", first_name="Operator", last_name=None)
         self.answers = []
 
     async def answer(self, text, **kwargs):
@@ -58,6 +59,7 @@ class FakeCallback:
     def __init__(self, data, message=None):
         self.data = data
         self.message = message or FakeMessage()
+        self.from_user = SimpleNamespace(id=10, username="operator", first_name="Operator", last_name=None)
         self.answers = []
 
     async def answer(self, text=None, **kwargs):
@@ -94,6 +96,10 @@ async def test_existing_code_cannot_silently_enter_creation(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_open_existing_update_is_explicit_callback(monkeypatch):
+    async def resolved(_user):
+        return {"user_id": 1, "username": "operator", "is_active": True, "role": "operator"}
+
+    monkeypatch.setattr("handlers.station.api.resolve_telegram_user", resolved)
     state = FakeState(
         {"lang": "en", "nonce": "abcd", "version": 1, "existing": existing_station(), "existing_station_id": 42},
         RegisterStation.existing_offer.state,
