@@ -30,6 +30,7 @@ from app.services.operator_activity import (
     touch_presence,
 )
 from app.services.station_permissions import enforce_station_create_policy, enforce_station_update_policy
+from app.services.station_views import serialize_stations
 
 
 def request() -> Request:
@@ -112,7 +113,10 @@ async def test_telegram_operator_create_is_pending_and_attributed(db):
     assert station.vpn_ip is None and station.local_ip is None and station.rustdesk_id is None
     audit = (await db.execute(select(AuditLog).where(AuditLog.entity_id == str(station.id), AuditLog.action == "station.create"))).scalar_one()
     assert audit.actor_user_id == operator.id and audit.source == "telegram"
-    assert result.created_by_username == operator.username and result.created_by_role == Role.operator
+    assert result.created_by_username is None and result.created_by_role is None
+    admin_inventory_row = (await serialize_stations(db, [station], include_actor_attribution=True))[0]
+    assert admin_inventory_row.created_by_username == operator.username
+    assert admin_inventory_row.created_by_role == Role.operator
     repeated = await telegram_create_station(
         TelegramStationCreateIn(
             **actor,

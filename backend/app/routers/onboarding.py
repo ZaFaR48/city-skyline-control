@@ -288,7 +288,7 @@ async def station_inventory(
         .options(selectinload(Station.city), selectinload(Station.district))
         .order_by(Station.station_code)
     )).scalars().all())
-    rows = await serialize_stations(db, stations)
+    rows = await serialize_stations(db, stations, include_actor_attribution=True)
     duplicate_ids = await _suspected_duplicate_ids(db, stations) if view == "suspected_duplicate" else set()
     if view == "pending":
         rows = [row for row in rows if row.approved_at is None and not row.is_archived]

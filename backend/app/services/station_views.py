@@ -20,7 +20,12 @@ from ..models import (
 from ..schemas import StationOut
 
 
-async def serialize_stations(db: AsyncSession, stations: list[Station]) -> list[StationOut]:
+async def serialize_stations(
+    db: AsyncSession,
+    stations: list[Station],
+    *,
+    include_actor_attribution: bool = False,
+) -> list[StationOut]:
     if not stations:
         return []
     ids = [station.id for station in stations]
@@ -62,17 +67,19 @@ async def serialize_stations(db: AsyncSession, stations: list[Station]) -> list[
     camera_counts = {row[0]: (row[1], row[2]) for row in camera_rows}
     alert_counts = dict(alert_rows)
     node_by_station = {node.station_id: node for node in nodes}
-    audit_rows = (
-        await db.execute(
-            select(AuditLog)
-            .where(
-                AuditLog.entity_type == "station",
-                AuditLog.entity_id.in_([str(station_id) for station_id in ids]),
-                AuditLog.action.in_(("station.create", "station.update")),
+    audit_rows = []
+    if include_actor_attribution:
+        audit_rows = list((
+            await db.execute(
+                select(AuditLog)
+                .where(
+                    AuditLog.entity_type == "station",
+                    AuditLog.entity_id.in_([str(station_id) for station_id in ids]),
+                    AuditLog.action.in_(("station.create", "station.update")),
+                )
+                .order_by(AuditLog.timestamp, AuditLog.id)
             )
-            .order_by(AuditLog.timestamp, AuditLog.id)
-        )
-    ).scalars().all()
+        ).scalars().all())
     actor_ids = {row.actor_user_id for row in audit_rows if row.actor_user_id is not None}
     actors = {
         user.id: user
