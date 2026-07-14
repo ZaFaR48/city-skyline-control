@@ -51,7 +51,11 @@ async def test_start_always_displays_three_language_choices(monkeypatch):
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("button", "language", "menu_text"),
-    [("🇹🇯 Тоҷикӣ", "tj", "Сабти стансияи нав"), ("🇷🇺 Русский", "ru", "Зарегистрировать станцию"), ("🇬🇧 English", "en", "Register station")],
+        [
+            ("🇹🇯 Тоҷикӣ", "tj", "Стансияи навро сабт кардан"),
+            ("🇷🇺 Русский", "ru", "Зарегистрировать новую станцию"),
+            ("🇬🇧 English", "en", "Register new station"),
+        ],
 )
 async def test_language_selection_persists_and_immediately_rebuilds_menu(monkeypatch, button, language, menu_text):
     saved = {}

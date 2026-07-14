@@ -15,9 +15,10 @@ router = Router()
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext) -> None:
-    await state.clear()
     if message.from_user is None:
         return
+    from handlers.station import cancel_active_station_workflow
+    await cancel_active_station_workflow(message, state)
     result = await _registration(message)
     await state.update_data(
         access_status=(result or {}).get("status"),

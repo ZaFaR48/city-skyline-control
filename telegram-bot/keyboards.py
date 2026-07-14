@@ -79,3 +79,7 @@ def wizard_inline(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=text, callback_data=data) for text, data in row] for row in rows
     ])
+
+
+def finished_workflow_keyboard(lang: str = "tj") -> InlineKeyboardMarkup:
+    return wizard_inline([[(t(lang, "open_main_menu"), "menu:current")]])

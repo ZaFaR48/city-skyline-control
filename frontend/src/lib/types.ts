@@ -240,6 +240,45 @@ export interface HeadscaleClassificationPreview {
   preview_token: string | null;
 }
 
+export type HeadscaleReconciliationAction =
+  | "link_node"
+  | "replace_node"
+  | "remove_stale_link"
+  | "refresh_vpn";
+
+export interface HeadscaleReconciliationRow {
+  station_id: number;
+  station_code: string;
+  station_vpn_ip: string | null;
+  linked_node_id: number | null;
+  linked_node_hostname: string | null;
+  authoritative_node_vpn_ip: string | null;
+  node_online: boolean | null;
+  node_last_seen_at: string | null;
+  status: string;
+  conflict_status: string | null;
+  recommended_action: string;
+  candidate_node_ids: number[];
+}
+
+export interface HeadscaleReconciliationPreview {
+  valid: boolean;
+  errors: string[];
+  action: HeadscaleReconciliationAction;
+  station_id: number;
+  station_code: string;
+  old_node_id: number | null;
+  old_node_hostname: string | null;
+  old_node_vpn_ip: string | null;
+  new_node_id: number | null;
+  new_node_hostname: string | null;
+  new_node_vpn_ip: string | null;
+  new_node_operating_system: string | null;
+  new_node_last_seen_at: string | null;
+  confirmation_phrase: string;
+  preview_token: string | null;
+}
+
 export interface DistrictHealth {
   id: number;
   code: string;

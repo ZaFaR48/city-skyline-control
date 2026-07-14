@@ -6,10 +6,12 @@ from datetime import datetime
 
 import httpx
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
 from ..database import SessionLocal
 from ..models import ApprovalStatus, DeviceType, HeadscaleNode, Station
+from .audit import add_audit
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
@@ -64,6 +66,7 @@ async def sync_headscale_nodes() -> int:
                 db.add(node)
                 added += 1
             else:
+                previous_node_vpn = node.vpn_ip
                 node.hostname = hostname
                 node.given_name = given_name
                 node.vpn_ip = vpn_ip
@@ -80,7 +83,49 @@ async def sync_headscale_nodes() -> int:
             ):
                 station = await db.get(Station, node.station_id)
                 if station:
-                    station.vpn_ip = vpn_ip
-                    station.last_seen_at = last_seen or station.last_seen_at
+                    await sync_linked_station_vpn(
+                        db, station, node, vpn_ip, last_seen=last_seen,
+                        authoritative_ip_changed=previous_node_vpn != vpn_ip,
+                    )
         await db.commit()
     return added
+
+
+async def sync_linked_station_vpn(
+    db: AsyncSession, station: Station, node: HeadscaleNode, vpn_ip: str,
+    *, last_seen: datetime | None, authoritative_ip_changed: bool,
+) -> bool:
+    conflict = await db.scalar(
+        select(Station.id).where(
+            Station.id != station.id, Station.is_active.is_(True), Station.is_archived.is_(False),
+            Station.vpn_ip == vpn_ip,
+        ).limit(1)
+    )
+    node_conflict = await db.scalar(
+        select(HeadscaleNode.id).join(Station, Station.id == HeadscaleNode.station_id).where(
+            HeadscaleNode.id != node.id, HeadscaleNode.vpn_ip == vpn_ip,
+            HeadscaleNode.device_type == DeviceType.station.value,
+            HeadscaleNode.approval_status == ApprovalStatus.approved.value,
+            Station.id != station.id, Station.is_active.is_(True), Station.is_archived.is_(False),
+        ).limit(1)
+    )
+    changed = False
+    if not conflict and not node_conflict and station.vpn_ip != vpn_ip:
+        previous = station.vpn_ip
+        station.vpn_ip = vpn_ip
+        add_audit(
+            db, action="station.vpn_sync_headscale", entity_type="station", entity_id=station.id,
+            actor=None, before={"vpn_ip": previous, "headscale_node_id": node.id},
+            after={"vpn_ip": vpn_ip, "headscale_node_id": node.id}, source="system",
+        )
+        changed = True
+    elif (conflict or node_conflict) and authoritative_ip_changed:
+        add_audit(
+            db, action="station.vpn_sync_headscale_conflict", entity_type="station",
+            entity_id=station.id, actor=None,
+            before={"vpn_ip": station.vpn_ip, "headscale_node_id": node.id},
+            after={"authoritative_vpn_ip": vpn_ip, "conflicting_station_id": conflict,
+                   "conflicting_node_id": node_conflict}, source="system",
+        )
+    station.last_seen_at = last_seen or station.last_seen_at
+    return changed

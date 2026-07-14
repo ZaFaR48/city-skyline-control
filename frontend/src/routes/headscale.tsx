@@ -15,10 +15,13 @@ import {
 import { Topbar } from "@/components/Topbar";
 import {
   approveHeadscaleNode,
+  applyHeadscaleReconciliation,
   applyHeadscaleClassification,
   getHeadscaleNodes,
+  getHeadscaleIpReconciliation,
   getHeadscaleStationOptions,
   previewHeadscaleApproval,
+  previewHeadscaleReconciliation,
   previewHeadscaleClassification,
   rejectHeadscaleNode,
   syncHeadscale,
@@ -31,6 +34,8 @@ import type {
   HeadscaleApprovalPreview,
   HeadscaleClassificationPreview,
   HeadscaleNode,
+  HeadscaleReconciliationAction,
+  HeadscaleReconciliationPreview,
   HeadscaleStationOption,
   User,
 } from "@/lib/types";
@@ -81,6 +86,10 @@ function HeadscalePage() {
   const [classificationPreview, setClassificationPreview] =
     useState<HeadscaleClassificationPreview | null>(null);
   const [classificationConfirmation, setClassificationConfirmation] = useState("");
+  const [reconciliationPreview, setReconciliationPreview] =
+    useState<HeadscaleReconciliationPreview | null>(null);
+  const [reconciliationConfirmation, setReconciliationConfirmation] = useState("");
+  const [candidateNodes, setCandidateNodes] = useState<Record<number, string>>({});
 
   const nodeParams = useMemo(
     () => ({
@@ -106,11 +115,21 @@ function HeadscalePage() {
     queryFn: ({ signal }) => getHeadscaleStationOptions(signal),
     staleTime: 30_000,
   });
+  const reconciliationQuery = useQuery({
+    queryKey: ["headscale", "ip-reconciliation"],
+    queryFn: ({ signal }) => getHeadscaleIpReconciliation(signal),
+    enabled: isAdmin,
+    staleTime: 30_000,
+  });
   const nodes: HeadscaleNode[] = nodesQuery.data?.items ?? [];
   const stations: HeadscaleStationOption[] = stationsQuery.data ?? [];
 
   async function load() {
-    await Promise.all([nodesQuery.refetch(), stationsQuery.refetch()]);
+    await Promise.all([
+      nodesQuery.refetch(),
+      stationsQuery.refetch(),
+      ...(isAdmin ? [reconciliationQuery.refetch()] : []),
+    ]);
   }
 
   const pendingCount = nodesQuery.data?.pending_count ?? 0;
@@ -236,6 +255,46 @@ function HeadscalePage() {
     }
   }
 
+  async function openReconciliationPreview(
+    stationId: number,
+    action: HeadscaleReconciliationAction,
+    candidateNodeId?: number,
+  ) {
+    setBusy(true);
+    setError(null);
+    setReconciliationConfirmation("");
+    try {
+      setReconciliationPreview(
+        await previewHeadscaleReconciliation(stationId, action, candidateNodeId),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Reconciliation preview failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmReconciliation() {
+    if (
+      !reconciliationPreview?.valid ||
+      !reconciliationPreview.preview_token ||
+      reconciliationConfirmation !== reconciliationPreview.confirmation_phrase
+    )
+      return;
+    setBusy(true);
+    setError(null);
+    try {
+      await applyHeadscaleReconciliation(reconciliationPreview, reconciliationConfirmation);
+      setReconciliationPreview(null);
+      setReconciliationConfirmation("");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Reconciliation failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <>
       <Topbar
@@ -343,6 +402,143 @@ function HeadscalePage() {
             Clear filters
           </button>
         </div>
+
+        {isAdmin && (
+          <div className="glass overflow-x-auto rounded-xl">
+            <div className="flex items-center justify-between border-b border-border p-4">
+              <div>
+                <div className="font-medium">IP Reconciliation</div>
+                <div className="text-xs text-muted-foreground">
+                  Read-only dry run. Every change opens a separate typed-confirmation preview.
+                </div>
+              </div>
+              <button
+                onClick={() => void reconciliationQuery.refetch()}
+                className="inline-flex h-9 items-center gap-2 rounded border border-border px-3 text-xs"
+              >
+                <RefreshCw className="size-4" /> Refresh dry run
+              </button>
+            </div>
+            <table className="w-full min-w-[1180px] text-sm">
+              <thead className="bg-panel text-left text-xs uppercase text-muted-foreground">
+                <tr>
+                  <th className="p-3">Station</th>
+                  <th>Stored VPN</th>
+                  <th>Linked node</th>
+                  <th>Authoritative VPN</th>
+                  <th>Online / last seen</th>
+                  <th>Status</th>
+                  <th>Recommended action</th>
+                  <th className="p-3 text-right">One-at-a-time action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(reconciliationQuery.data ?? []).map((row) => {
+                  const selectedCandidate =
+                    candidateNodes[row.station_id] ??
+                    (row.candidate_node_ids[0] ? String(row.candidate_node_ids[0]) : "");
+                  return (
+                    <tr key={row.station_id} className="border-t border-border align-top">
+                      <td className="p-3 font-medium">{row.station_code}</td>
+                      <td className="font-mono text-xs">{row.station_vpn_ip ?? "—"}</td>
+                      <td>
+                        {row.linked_node_id
+                          ? `#${row.linked_node_id} · ${row.linked_node_hostname ?? "—"}`
+                          : "—"}
+                      </td>
+                      <td className="font-mono text-xs">{row.authoritative_node_vpn_ip ?? "—"}</td>
+                      <td className="text-xs">
+                        {row.node_online == null ? "—" : row.node_online ? "Online" : "Offline"}
+                        <div className="text-muted-foreground">
+                          {row.node_last_seen_at
+                            ? new Date(row.node_last_seen_at).toLocaleString()
+                            : "—"}
+                        </div>
+                      </td>
+                      <td className={row.status === "OK" ? "text-success" : "text-warning"}>
+                        {row.status.replaceAll("_", " ")}
+                        {row.conflict_status && (
+                          <div className="text-xs text-destructive">{row.conflict_status}</div>
+                        )}
+                      </td>
+                      <td className="text-xs">{row.recommended_action}</td>
+                      <td className="p-3">
+                        <div className="flex justify-end gap-2">
+                          {row.candidate_node_ids.length > 0 && (
+                            <select
+                              value={selectedCandidate}
+                              onChange={(event) =>
+                                setCandidateNodes((current) => ({
+                                  ...current,
+                                  [row.station_id]: event.target.value,
+                                }))
+                              }
+                              className="h-8 rounded border border-border bg-input px-2 text-xs"
+                            >
+                              {row.candidate_node_ids.map((id) => (
+                                <option key={id} value={id}>
+                                  Node #{id}
+                                </option>
+                              ))}
+                            </select>
+                          )}
+                          {row.status === "linked_node_changed_ip" && (
+                            <button
+                              onClick={() =>
+                                void openReconciliationPreview(row.station_id, "refresh_vpn")
+                              }
+                              className="h-8 rounded border border-primary/40 px-2 text-xs text-primary"
+                            >
+                              Refresh VPN
+                            </button>
+                          )}
+                          {!row.linked_node_id && selectedCandidate && (
+                            <button
+                              onClick={() =>
+                                void openReconciliationPreview(
+                                  row.station_id,
+                                  "link_node",
+                                  Number(selectedCandidate),
+                                )
+                              }
+                              className="h-8 rounded border border-primary/40 px-2 text-xs text-primary"
+                            >
+                              Link node
+                            </button>
+                          )}
+                          {row.linked_node_id && selectedCandidate && (
+                            <button
+                              onClick={() =>
+                                void openReconciliationPreview(
+                                  row.station_id,
+                                  "replace_node",
+                                  Number(selectedCandidate),
+                                )
+                              }
+                              className="h-8 rounded border border-warning/40 px-2 text-xs text-warning"
+                            >
+                              Replace node
+                            </button>
+                          )}
+                          {row.linked_node_id && row.status !== "OK" && (
+                            <button
+                              onClick={() =>
+                                void openReconciliationPreview(row.station_id, "remove_stale_link")
+                              }
+                              className="h-8 rounded border border-destructive/40 px-2 text-xs text-destructive"
+                            >
+                              Remove stale link
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
 
         <div className="glass overflow-x-auto rounded-xl">
           <table className="w-full min-w-[1320px] text-sm">
@@ -726,6 +922,82 @@ function HeadscalePage() {
                 className="h-9 rounded bg-primary px-4 text-xs text-primary-foreground disabled:opacity-40"
               >
                 Apply classification
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {reconciliationPreview && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-background/80 p-4 backdrop-blur-sm">
+          <div className="glass w-full max-w-2xl rounded-xl p-5 shadow-2xl">
+            <div className="mb-4 flex items-start justify-between">
+              <div>
+                <h2 className="font-semibold">Confirm IP reconciliation</h2>
+                <p className="text-xs text-muted-foreground">
+                  One station and one action only. Production approval is not changed.
+                </p>
+              </div>
+              <button onClick={() => setReconciliationPreview(null)}>
+                <X className="size-5" />
+              </button>
+            </div>
+            <dl className="grid grid-cols-[11rem_1fr] gap-2 text-sm">
+              <dt className="text-muted-foreground">Station</dt>
+              <dd>{reconciliationPreview.station_code}</dd>
+              <dt className="text-muted-foreground">Action</dt>
+              <dd>{reconciliationPreview.action.replaceAll("_", " ")}</dd>
+              <dt className="text-muted-foreground">Old node / VPN</dt>
+              <dd>
+                #{reconciliationPreview.old_node_id ?? "—"} ·{" "}
+                {reconciliationPreview.old_node_hostname ?? "—"} ·{" "}
+                <span className="font-mono">{reconciliationPreview.old_node_vpn_ip ?? "—"}</span>
+              </dd>
+              <dt className="text-muted-foreground">New node / VPN</dt>
+              <dd>
+                #{reconciliationPreview.new_node_id ?? "—"} ·{" "}
+                {reconciliationPreview.new_node_hostname ?? "—"} ·{" "}
+                <span className="font-mono">{reconciliationPreview.new_node_vpn_ip ?? "—"}</span>
+              </dd>
+              <dt className="text-muted-foreground">OS / last seen</dt>
+              <dd>
+                {reconciliationPreview.new_node_operating_system ?? "—"} ·{" "}
+                {reconciliationPreview.new_node_last_seen_at
+                  ? new Date(reconciliationPreview.new_node_last_seen_at).toLocaleString()
+                  : "—"}
+              </dd>
+            </dl>
+            {reconciliationPreview.errors.length > 0 && (
+              <div className="mt-4 rounded border border-destructive/40 p-3 text-sm text-destructive">
+                {reconciliationPreview.errors.join(" · ")}
+              </div>
+            )}
+            {reconciliationPreview.valid && (
+              <label className="mt-4 block text-xs">
+                Type <code>{reconciliationPreview.confirmation_phrase}</code> to confirm
+                <input
+                  value={reconciliationConfirmation}
+                  onChange={(event) => setReconciliationConfirmation(event.target.value)}
+                  className="mt-1 block h-9 w-full rounded border border-border bg-input px-3"
+                />
+              </label>
+            )}
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                onClick={() => setReconciliationPreview(null)}
+                className="h-9 rounded border border-border px-4 text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={
+                  busy ||
+                  !reconciliationPreview.valid ||
+                  reconciliationConfirmation !== reconciliationPreview.confirmation_phrase
+                }
+                onClick={() => void confirmReconciliation()}
+                className="h-9 rounded bg-primary px-4 text-xs text-primary-foreground disabled:opacity-40"
+              >
+                Apply one action
               </button>
             </div>
           </div>

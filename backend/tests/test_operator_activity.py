@@ -20,9 +20,13 @@ from app.models import (
 from app.routers.activity import (
     start_telegram_workflow,
     telegram_create_station,
+    telegram_workflow_event,
     telegram_update_station,
 )
-from app.schemas import TelegramStationCreateIn, TelegramStationUpdateIn, TelegramWorkflowStartIn
+from app.schemas import (
+    TelegramStationCreateIn, TelegramStationUpdateIn, TelegramWorkflowEventIn,
+    TelegramWorkflowStartIn,
+)
 from app.services.operator_activity import (
     abandon_inactive_workflows_in_db,
     presence_state,
@@ -50,6 +54,19 @@ async def actors_and_regions(db, suffix: str):
     db.add(identity)
     await db.flush()
     return service_admin, operator, identity, city, district
+
+
+async def preview(db, admin, actor, workflow_id, *, before=None, after=None, changed_fields=None):
+    result = await telegram_workflow_event(
+        workflow_id,
+        TelegramWorkflowEventIn(
+            **actor, action="telegram.station_preview.generated", status="in_progress",
+            current_step="confirmation", version=1, before_data=before, after_data=after,
+            changed_fields=changed_fields or [],
+        ),
+        db, admin,
+    )
+    return result["preview_hash"]
 
 
 @pytest.mark.asyncio
@@ -87,14 +104,17 @@ async def test_telegram_operator_create_is_pending_and_attributed(db):
     workflow_id = "00000000-0000-0000-0000-000000000101"
     actor = {"telegram_user_id": identity.telegram_user_id, "telegram_username": identity.telegram_username}
     await start_telegram_workflow(
-        TelegramWorkflowStartIn(**actor, workflow_id=workflow_id, workflow_type="registration", current_step="station_code", correlation_id="correlation-create"),
+        TelegramWorkflowStartIn(**actor, workflow_id=workflow_id, workflow_type="registration", mode="create", current_step="station_code", correlation_id="correlation-create"),
         db,
         admin,
     )
+    token = await preview(db, admin, actor, workflow_id, after={"station_code": "OP-CREATE-101", "name": "Operator station", "city_id": city.id, "district_id": district.id, "operational_area": "Customs", "address": "Rudaki 10"})
     result = await telegram_create_station(
         TelegramStationCreateIn(
             **actor,
             workflow_id=workflow_id,
+            workflow_version=1,
+            preview_hash=token,
             station_code="OP-CREATE-101",
             name="Operator station",
             city_id=city.id,
@@ -121,6 +141,8 @@ async def test_telegram_operator_create_is_pending_and_attributed(db):
         TelegramStationCreateIn(
             **actor,
             workflow_id=workflow_id,
+            workflow_version=1,
+            preview_hash=token,
             station_code="OP-CREATE-101",
             name="Operator station",
             city_id=city.id,
@@ -155,19 +177,20 @@ async def test_telegram_operator_update_preserves_approval_and_infrastructure(db
     workflow_id = "00000000-0000-0000-0000-000000000102"
     actor = {"telegram_user_id": identity.telegram_user_id, "telegram_username": identity.telegram_username}
     await start_telegram_workflow(
-        TelegramWorkflowStartIn(**actor, workflow_id=workflow_id, workflow_type="update", station_code=station.station_code, current_step="station_code", correlation_id="correlation-update"),
+        TelegramWorkflowStartIn(**actor, workflow_id=workflow_id, workflow_type="update", mode="update", station_code=station.station_code, current_step="station_code", correlation_id="correlation-update"),
         db,
         admin,
     )
+    token = await preview(db, admin, actor, workflow_id, before={"address": "Before address"}, after={"address": "After address"}, changed_fields=["address"])
     result = await telegram_update_station(
         station.id,
-        TelegramStationUpdateIn(**actor, workflow_id=workflow_id, address="After address", name="After"),
+        TelegramStationUpdateIn(**actor, workflow_id=workflow_id, workflow_version=1, preview_hash=token, expected_before={"address": "Before address"}, address="After address"),
         request(),
         db,
         admin,
     )
     await db.refresh(station)
-    assert result.address == "After address" and result.name == "After"
+    assert result.address == "After address" and result.name == "Before"
     assert station.approved_at == approved_at and station.approved_by == approved_by and station.vpn_ip == vpn_ip
 
 
@@ -177,7 +200,7 @@ async def test_live_role_change_blocks_started_operator_workflow(db):
     workflow_id = "00000000-0000-0000-0000-000000000103"
     actor = {"telegram_user_id": identity.telegram_user_id, "telegram_username": identity.telegram_username}
     await start_telegram_workflow(
-        TelegramWorkflowStartIn(**actor, workflow_id=workflow_id, workflow_type="registration", current_step="station_code", correlation_id="correlation-role"),
+        TelegramWorkflowStartIn(**actor, workflow_id=workflow_id, workflow_type="registration", mode="create", current_step="station_code", correlation_id="correlation-role"),
         db,
         admin,
     )
@@ -185,7 +208,7 @@ async def test_live_role_change_blocks_started_operator_workflow(db):
     await db.flush()
     with pytest.raises(HTTPException) as exc:
         await start_telegram_workflow(
-            TelegramWorkflowStartIn(**actor, workflow_id="00000000-0000-0000-0000-000000000104", workflow_type="registration", current_step="station_code", correlation_id="correlation-role-2"),
+            TelegramWorkflowStartIn(**actor, workflow_id="00000000-0000-0000-0000-000000000104", workflow_type="registration", mode="create", current_step="station_code", correlation_id="correlation-role-2"),
             db,
             admin,
         )
@@ -204,6 +227,7 @@ async def test_inactive_workflow_is_abandoned_exactly_once(db):
         actor_role=operator.role,
         telegram_user_id=identity.telegram_user_id,
         workflow_type="registration",
+        mode="create",
         status="in_progress",
         current_step="address",
         last_activity_at=now - timedelta(hours=2),
@@ -216,3 +240,49 @@ async def test_inactive_workflow_is_abandoned_exactly_once(db):
     assert await abandon_inactive_workflows_in_db(db, now) == 0
     events = await db.scalar(select(func.count()).select_from(OperatorActivityEvent).where(OperatorActivityEvent.workflow_id == workflow.id, OperatorActivityEvent.action == "telegram.station_workflow.abandoned"))
     assert workflow.status == "abandoned" and events == 1
+
+
+@pytest.mark.asyncio
+async def test_starting_new_mode_cancels_previous_workflow_and_returns_prompt(db):
+    admin, _, identity, _, _ = await actors_and_regions(db, "supersede")
+    actor = {"telegram_user_id": identity.telegram_user_id, "telegram_username": identity.telegram_username}
+    first_id = "00000000-0000-0000-0000-000000000106"
+    await start_telegram_workflow(
+        TelegramWorkflowStartIn(
+            **actor, workflow_id=first_id, workflow_type="registration", mode="create",
+            current_step="station_code", correlation_id="correlation-first",
+        ), db, admin,
+    )
+    await telegram_workflow_event(
+        first_id,
+        TelegramWorkflowEventIn(
+            **actor, action="telegram.station_prompt.activated", status="in_progress",
+            current_step="station_code", version=1, active_prompt_message_id=99106,
+        ), db, admin,
+    )
+    second_id = "00000000-0000-0000-0000-000000000107"
+    result = await start_telegram_workflow(
+        TelegramWorkflowStartIn(
+            **actor, workflow_id=second_id, workflow_type="update", mode="update",
+            current_step="station_code", correlation_id="correlation-second",
+        ), db, admin,
+    )
+    first = await db.get(TelegramStationWorkflow, first_id)
+    second = await db.get(TelegramStationWorkflow, second_id)
+    assert first.status == "cancelled" and result["cancelled_prompt_message_ids"] == [99106]
+    assert second.status == "in_progress" and second.mode == "update"
+
+
+@pytest.mark.asyncio
+async def test_workflow_mode_and_type_must_match(db):
+    admin, _, identity, _, _ = await actors_and_regions(db, "mode-mismatch")
+    with pytest.raises(HTTPException) as exc:
+        await start_telegram_workflow(
+            TelegramWorkflowStartIn(
+                telegram_user_id=identity.telegram_user_id,
+                workflow_id="00000000-0000-0000-0000-000000000108",
+                workflow_type="registration", mode="update", current_step="station_code",
+                correlation_id="correlation-mismatch",
+            ), db, admin,
+        )
+    assert exc.value.status_code == 422

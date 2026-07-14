@@ -323,6 +323,53 @@ class HeadscaleClassificationPreviewOut(BaseModel):
     preview_token: str | None
 
 
+class HeadscaleReconciliationRowOut(BaseModel):
+    station_id: int
+    station_code: str
+    station_vpn_ip: str | None
+    linked_node_id: int | None
+    linked_node_hostname: str | None
+    authoritative_node_vpn_ip: str | None
+    node_online: bool | None
+    node_last_seen_at: datetime | None
+    status: Literal[
+        "OK", "station_has_no_linked_node", "linked_node_changed_ip", "vpn_ip_duplicated",
+        "linked_node_missing", "several_candidate_nodes", "device_type_is_not_station",
+        "approval_missing",
+    ]
+    conflict_status: str | None
+    recommended_action: str
+    candidate_node_ids: list[int] = Field(default_factory=list)
+
+
+class HeadscaleReconciliationPreviewIn(BaseModel):
+    action: Literal["link_node", "replace_node", "remove_stale_link", "refresh_vpn"]
+    candidate_node_id: int | None = None
+
+
+class HeadscaleReconciliationApplyIn(HeadscaleReconciliationPreviewIn):
+    preview_token: str
+    confirmation: str
+
+
+class HeadscaleReconciliationPreviewOut(BaseModel):
+    valid: bool
+    errors: list[str]
+    action: str
+    station_id: int
+    station_code: str
+    old_node_id: int | None
+    old_node_hostname: str | None
+    old_node_vpn_ip: str | None
+    new_node_id: int | None
+    new_node_hostname: str | None
+    new_node_vpn_ip: str | None
+    new_node_operating_system: str | None
+    new_node_last_seen_at: datetime | None
+    confirmation_phrase: str
+    preview_token: str | None
+
+
 class PingPoint(ORMModel):
     latency_ms: float | None
     packet_loss: float | None
@@ -764,6 +811,7 @@ class PresenceHeartbeatOut(BaseModel):
 class TelegramWorkflowStartIn(TelegramActorIn):
     workflow_id: str = Field(min_length=8, max_length=36)
     workflow_type: Literal["registration", "update"]
+    mode: Literal["create", "update"]
     station_code: str | None = Field(default=None, max_length=32)
     current_step: str = Field(max_length=64)
     correlation_id: str = Field(min_length=8, max_length=64)
@@ -773,6 +821,9 @@ class TelegramWorkflowEventIn(TelegramActorIn):
     action: str = Field(max_length=128)
     status: Literal["in_progress", "completed", "cancelled", "failed"]
     current_step: str = Field(max_length=64)
+    version: int = Field(ge=0)
+    active_prompt_message_id: int | None = None
+    telegram_update_id: int | None = None
     station_id: int | None = None
     station_code: str | None = Field(default=None, max_length=32)
     changed_fields: list[str] = Field(default_factory=list, max_length=16)
@@ -783,6 +834,8 @@ class TelegramWorkflowEventIn(TelegramActorIn):
 
 class TelegramStationCreateIn(TelegramActorIn):
     workflow_id: str = Field(min_length=8, max_length=36)
+    workflow_version: int = Field(ge=0)
+    preview_hash: str = Field(min_length=8, max_length=64)
     station_code: str = Field(min_length=1, max_length=32)
     name: str = Field(min_length=1, max_length=128)
     city_id: int
@@ -795,6 +848,9 @@ class TelegramStationCreateIn(TelegramActorIn):
 
 class TelegramStationUpdateIn(TelegramActorIn):
     workflow_id: str = Field(min_length=8, max_length=36)
+    workflow_version: int = Field(ge=0)
+    preview_hash: str = Field(min_length=8, max_length=64)
+    expected_before: dict[str, Any]
     city_id: int | None = None
     district_id: int | None = None
     operational_area: str | None = Field(default=None, max_length=128)

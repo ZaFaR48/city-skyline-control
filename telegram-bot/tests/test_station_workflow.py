@@ -7,8 +7,10 @@ import pytest
 
 from handlers.station import (
     _build_create,
+    _show_update_confirm,
     _save_update,
     back_station,
+    cancel_station,
     register_address,
     register_area,
     register_code,
@@ -43,16 +45,24 @@ class FakeState:
 
 
 class FakeMessage:
-    def __init__(self, text="", *, location=None, chat_id=10):
+    def __init__(self, text="", *, location=None, chat_id=10, message_id=50):
         self.text = text
         self.location = location
         self.chat = SimpleNamespace(id=chat_id)
         self.from_user = SimpleNamespace(id=10, username="operator", first_name="Operator", last_name=None)
+        self.message_id = message_id
         self.answers = []
+        self.edits = []
 
     async def answer(self, text, **kwargs):
         self.answers.append((text, kwargs.get("reply_markup")))
         return SimpleNamespace(message_id=len(self.answers))
+
+    async def edit_text(self, text, **kwargs):
+        self.edits.append((text, kwargs.get("reply_markup")))
+
+    async def edit_reply_markup(self, **kwargs):
+        self.edits.append((None, kwargs.get("reply_markup")))
 
 
 class FakeCallback:
@@ -91,7 +101,7 @@ async def test_existing_code_cannot_silently_enter_creation(monkeypatch):
     message = FakeMessage("10002")
     await register_code(message, state)
     assert state.current == RegisterStation.existing_offer.state
-    assert "Creation has stopped" in message.answers[0][0]
+    assert "Creation of a new record has stopped" in message.answers[0][0]
 
 
 @pytest.mark.asyncio
@@ -100,8 +110,11 @@ async def test_open_existing_update_is_explicit_callback(monkeypatch):
         return {"user_id": 1, "username": "operator", "is_active": True, "role": "operator"}
 
     monkeypatch.setattr("handlers.station.api.resolve_telegram_user", resolved)
+    monkeypatch.setattr("handlers.station.api.start_station_workflow", lambda *args, **kwargs: _async({"status": "in_progress"}))
     state = FakeState(
-        {"lang": "en", "nonce": "abcd", "version": 1, "existing": existing_station(), "existing_station_id": 42},
+        {"lang": "en", "role": "operator", "nonce": "abcd", "version": 1,
+         "telegram_user_id": 10, "chat_id": 10, "prompt_message_id": 50,
+         "existing": existing_station(), "existing_station_id": 42},
         RegisterStation.existing_offer.state,
     )
     callback = FakeCallback("st:abcd:1:open_update:-")
@@ -151,12 +164,17 @@ async def test_operational_area_and_address_never_shift():
 
 
 @pytest.mark.asyncio
-async def test_gps_then_late_text_cannot_overwrite_name():
+async def test_gps_then_late_text_cannot_overwrite_name(monkeypatch):
+    monkeypatch.setattr("handlers.station.api.regions", lambda: _async([
+        {"id": 1, "code": "dushanbe"}, {"id": 2, "code": "sino"},
+    ]))
     state = FakeState(
         {
             "lang": "en", "nonce": "abcd", "version": 6, "code": "10998",
-            "city_name": "Dushanbe", "district_name": "Sino", "operational_area": "Customs",
+            "city_code": "dushanbe", "city_name": "Dushanbe", "district_code": "sino",
+            "district_name": "Sino", "operational_area": "Customs",
             "address": "Rudaki 10", "name": "Chosen name",
+            "telegram_user_id": 10, "chat_id": 30, "prompt_message_id": 50,
         },
         RegisterStation.gps.state,
     )
@@ -181,11 +199,13 @@ async def test_rapid_messages_do_not_populate_next_field():
 
 @pytest.mark.asyncio
 async def test_stale_callback_version_is_rejected():
-    state = FakeState({"lang": "en", "nonce": "abcd", "version": 7}, UpdateStation.menu.state)
+    state = FakeState({"lang": "en", "nonce": "abcd", "version": 7,
+                       "telegram_user_id": 10, "prompt_message_id": 50}, UpdateStation.menu.state)
     callback = FakeCallback("st:abcd:6:update_field:name")
     await station_callback(callback, state)
     assert state.current == UpdateStation.menu.state
-    assert callback.answers[0][1]["show_alert"] is True
+    assert callback.answers[0][1].get("show_alert") is not True
+    assert "already finished" in callback.message.edits[0][0]
 
 
 @pytest.mark.asyncio
@@ -212,6 +232,66 @@ async def test_duplicate_update_is_idempotent(monkeypatch):
     callback = FakeCallback("st:abcd:8:update_confirm:save")
     await _save_update(callback, state, "en")
     assert calls == 0
+
+
+@pytest.mark.asyncio
+async def test_no_changes_preview_has_no_save_button():
+    current = existing_station()
+    state = FakeState(
+        {"lang": "en", "nonce": "abcd", "version": 2, "existing": current,
+         "selected_field": "address"}, UpdateStation.text_value.state,
+    )
+    message = FakeMessage()
+    await _show_update_confirm(message, state, "en", {"address": current["address"]})
+    markup = message.answers[0][1]
+    labels = [button.text for row in markup.inline_keyboard for button in row]
+    assert "Save changes" not in labels
+    assert "Choose another field" in labels
+
+
+@pytest.mark.asyncio
+async def test_duplicate_location_message_is_ignored(monkeypatch):
+    monkeypatch.setattr("handlers.station.api.regions", lambda: _async([
+        {"id": 1, "code": "dushanbe"}, {"id": 2, "code": "sino"},
+    ]))
+    state = FakeState(
+        {"lang": "en", "nonce": "abcd", "version": 6, "code": "10998",
+         "city_code": "dushanbe", "city_name": "Dushanbe", "district_code": "sino",
+         "district_name": "Sino", "operational_area": "Customs", "address": "Rudaki 10",
+         "name": "Chosen name", "telegram_user_id": 10, "chat_id": 30,
+         "prompt_message_id": 50, "accepted_location_message_id": 77}, RegisterStation.gps.state,
+    )
+    message = FakeMessage(location=SimpleNamespace(latitude=1, longitude=2), chat_id=30, message_id=77)
+    await register_gps(message, state)
+    assert state.current == RegisterStation.gps.state
+    assert "latitude" not in state.data
+
+
+@pytest.mark.asyncio
+async def test_cancel_clears_complete_workflow_state(monkeypatch):
+    monkeypatch.setattr("handlers.station.api.station_workflow_event", lambda *args, **kwargs: _async({}))
+    state = FakeState(
+        {"lang": "en", "role": "operator", "workflow_id": "workflow", "telegram_user_id": 10,
+         "nonce": "secret", "patch": {"address": "never saved"}}, UpdateStation.confirm.state,
+    )
+    await cancel_station(FakeMessage("/cancel"), state)
+    assert state.current is None
+    assert state.data == {"lang": "en", "role": "operator"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("lang", ["ru", "tj", "en"])
+async def test_update_preview_never_exposes_database_field_names(lang):
+    current = existing_station(district_id=None, district=None)
+    state = FakeState(
+        {"lang": lang, "nonce": "abcd", "version": 2, "existing": current,
+         "selected_field": "district", "patch_display": "Sino"}, UpdateStation.district.state,
+    )
+    message = FakeMessage()
+    await _show_update_confirm(message, state, lang, {"district_id": 3})
+    rendered = message.answers[0][0]
+    assert "district_id" not in rendered and "latitude" not in rendered and "longitude" not in rendered
+    assert "— → 3" not in rendered
 
 
 def test_create_payload_has_no_approval_or_operational_defaults():

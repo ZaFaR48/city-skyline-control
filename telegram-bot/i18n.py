@@ -15,8 +15,8 @@ LANGUAGE_NAMES = {
 
 MENU = {
     "tj": {
-        "register_station": "➕ Сабти стансияи нав",
-        "update_station": "✏️ Навсозии стансия",
+        "register_station": "➕ Стансияи навро сабт кардан",
+        "update_station": "✏️ Стансияи мавҷударо тағйир додан",
         "search_station": "🔍 Ҷустуҷӯи стансия",
         "station_summary": "📋 Ҳамаи стансияҳо",
         "district_stations": "🏙 Стансияҳо аз рӯйи ноҳия",
@@ -36,8 +36,8 @@ MENU = {
         "settings": "⚙️ Танзимот",
     },
     "ru": {
-        "register_station": "➕ Зарегистрировать станцию",
-        "update_station": "✏️ Обновить станцию",
+        "register_station": "➕ Зарегистрировать новую станцию",
+        "update_station": "✏️ Изменить существующую станцию",
         "search_station": "🔍 Найти станцию",
         "station_summary": "📋 Все станции",
         "district_stations": "🏙 Станции по району",
@@ -57,8 +57,8 @@ MENU = {
         "settings": "⚙️ Настройки",
     },
     "en": {
-        "register_station": "➕ Register station",
-        "update_station": "✏️ Update station",
+        "register_station": "➕ Register new station",
+        "update_station": "✏️ Update existing station",
         "search_station": "🔍 Find station",
         "station_summary": "📋 All stations",
         "district_stations": "🏙 Stations by district",
@@ -351,6 +351,34 @@ TEXT["en"].update({
     "reason_CONFLICTING_TELEMETRY": "exact cause is not determined",
 })
 
+TEXT["ru"].update({
+    "existing_create_blocked": "Станция {code} уже существует.\nСоздание новой записи остановлено.",
+    "open_existing_update": "✏️ Перейти к изменению станции",
+    "open_station_info": "🔍 Открыть информацию",
+    "workflow_finished": "Эта операция уже завершена.",
+    "open_main_menu": "Открыть текущее главное меню",
+    "no_field_changes": "Изменений нет.",
+    "choose_another_field": "Выбрать другое поле",
+})
+TEXT["tj"].update({
+    "existing_create_blocked": "Стансияи {code} аллакай мавҷуд аст.\nСохтани сабти нав қатъ гардид.",
+    "open_existing_update": "✏️ Ба тағйири стансия гузаштан",
+    "open_station_info": "🔍 Кушодани маълумот",
+    "workflow_finished": "Ин амалиёт аллакай анҷом ёфтааст.",
+    "open_main_menu": "Кушодани менюи асосии ҷорӣ",
+    "no_field_changes": "Тағйирот нест.",
+    "choose_another_field": "Интихоби майдони дигар",
+})
+TEXT["en"].update({
+    "existing_create_blocked": "Station {code} already exists.\nCreation of a new record has stopped.",
+    "open_existing_update": "✏️ Go to station update",
+    "open_station_info": "🔍 Open information",
+    "workflow_finished": "This operation has already finished.",
+    "open_main_menu": "Open the current main menu",
+    "no_field_changes": "There are no changes.",
+    "choose_another_field": "Choose another field",
+})
+
 TEXT["tj"].update({
     "registration_pending": "Дархости дастрасии шумо ба администратор фиристода шуд.",
     "registration_rejected": "Дархости шумо рад шуд. Ба администратори City Parking муроҷиат кунед.",
@@ -445,6 +473,10 @@ def localized_error(lang: str | None, code: str | None) -> str:
         "WORKFLOW_ID_CONFLICT": "stale_action",
         "WORKFLOW_NOT_FOUND": "stale_action",
         "WORKFLOW_ALREADY_FINISHED": "stale_action",
+        "WORKFLOW_VERSION_STALE": "stale_action",
+        "WORKFLOW_PREVIEW_STALE": "stale_action",
+        "WORKFLOW_PREVIEW_CONSUMED": "stale_action",
+        "STATION_CHANGED_AFTER_PREVIEW": "station_changed_restart",
         "INVALID_CITY": "canonical_region_unavailable",
         "INVALID_DISTRICT": "canonical_region_unavailable",
         "NO_STATION_FIELDS": "no_field_changes",

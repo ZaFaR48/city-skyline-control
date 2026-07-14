@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import String, cast, func, or_, select
@@ -165,6 +166,28 @@ async def start_telegram_workflow(
         if existing.actor_user_id != user.id:
             raise HTTPException(409, "WORKFLOW_ID_CONFLICT")
         return {"workflow_id": existing.id, "status": existing.status}
+    if (data.workflow_type == "registration") != (data.mode == "create"):
+        raise HTTPException(422, "WORKFLOW_MODE_MISMATCH")
+    current = datetime.now(timezone.utc)
+    old_workflows = list((await db.execute(
+        select(TelegramStationWorkflow).where(
+            TelegramStationWorkflow.actor_user_id == user.id,
+            TelegramStationWorkflow.status == "in_progress",
+        ).with_for_update()
+    )).scalars().all())
+    cancelled_prompt_message_ids = []
+    for old in old_workflows:
+        old.status = "cancelled"
+        old.current_step = "cancelled"
+        old.last_activity_at = old.completed_at = current
+        if old.active_prompt_message_id is not None:
+            cancelled_prompt_message_ids.append(old.active_prompt_message_id)
+        add_activity_event(
+            db, user=user, action="telegram.station_workflow.cancelled",
+            source="telegram", workflow=old, telegram_user_id=identity.telegram_user_id,
+            telegram_username=data.telegram_username or identity.telegram_username,
+            status="cancelled", step="cancelled", reason="superseded by a new workflow",
+        )
     workflow = TelegramStationWorkflow(
         id=data.workflow_id,
         actor_user_id=user.id,
@@ -172,6 +195,7 @@ async def start_telegram_workflow(
         telegram_user_id=identity.telegram_user_id,
         telegram_username=data.telegram_username or identity.telegram_username,
         workflow_type=data.workflow_type,
+        mode=data.mode,
         status="in_progress",
         station_code=data.station_code,
         current_step=data.current_step,
@@ -190,7 +214,7 @@ async def start_telegram_workflow(
         station_code=data.station_code,
     )
     await db.commit()
-    return {"workflow_id": workflow.id, "status": workflow.status}
+    return {"workflow_id": workflow.id, "status": workflow.status, "cancelled_prompt_message_ids": cancelled_prompt_message_ids}
 
 
 @router.post("/telegram/workflows/{workflow_id}/event")
@@ -201,21 +225,36 @@ async def telegram_workflow_event(
     _: User = Depends(require_roles(Role.admin)),
 ):
     user, identity = await _require_telegram_actor(db, data, TELEGRAM_STATION_ROLES)
-    workflow = await db.get(TelegramStationWorkflow, workflow_id)
+    workflow = await db.scalar(select(TelegramStationWorkflow).where(TelegramStationWorkflow.id == workflow_id).with_for_update())
     if not workflow or workflow.actor_user_id != user.id:
         raise HTTPException(404, "WORKFLOW_NOT_FOUND")
     if workflow.status != "in_progress" and data.status == "in_progress":
         raise HTTPException(409, "WORKFLOW_ALREADY_FINISHED")
+    if data.version < workflow.version:
+        raise HTTPException(409, "WORKFLOW_VERSION_STALE")
+    if data.telegram_update_id is not None and workflow.last_telegram_update_id == data.telegram_update_id:
+        return {"workflow_id": workflow.id, "status": workflow.status, "duplicate": True, "preview_hash": workflow.preview_hash}
     current = datetime.now(timezone.utc)
     workflow.actor_role = user.role
     workflow.current_step = data.current_step
+    workflow.version = data.version
+    workflow.active_prompt_message_id = data.active_prompt_message_id
+    if data.telegram_update_id is not None:
+        workflow.last_telegram_update_id = data.telegram_update_id
     workflow.last_activity_at = current
     workflow.station_id = data.station_id or workflow.station_id
     workflow.station_code = data.station_code or workflow.station_code
-    workflow.changed_fields = data.changed_fields
-    workflow.before_data = safe_values(data.before_data)
-    workflow.after_data = safe_values(data.after_data)
-    workflow.failure_reason = data.failure_reason
+    if "changed_fields" in data.model_fields_set:
+        workflow.changed_fields = data.changed_fields
+    if "before_data" in data.model_fields_set:
+        workflow.before_data = safe_values(data.before_data)
+    if "after_data" in data.model_fields_set:
+        workflow.after_data = safe_values(data.after_data)
+    if "failure_reason" in data.model_fields_set:
+        workflow.failure_reason = data.failure_reason
+    if data.action == "telegram.station_preview.generated":
+        workflow.preview_hash = secrets.token_urlsafe(12)
+        workflow.preview_consumed_at = None
     workflow.status = data.status
     if data.status in {"completed", "cancelled", "failed"}:
         workflow.completed_at = current
@@ -238,7 +277,7 @@ async def telegram_workflow_event(
         reason=data.failure_reason,
     )
     await db.commit()
-    return {"workflow_id": workflow.id, "status": workflow.status}
+    return {"workflow_id": workflow.id, "status": workflow.status, "preview_hash": workflow.preview_hash}
 
 
 @router.post("/telegram/stations", response_model=StationOut, status_code=201)
@@ -249,17 +288,19 @@ async def telegram_create_station(
     _: User = Depends(require_roles(Role.admin)),
 ):
     user, identity = await _require_telegram_actor(db, data, TELEGRAM_STATION_ROLES)
-    existing_workflow = await db.get(TelegramStationWorkflow, data.workflow_id)
+    existing_workflow = await db.scalar(select(TelegramStationWorkflow).where(TelegramStationWorkflow.id == data.workflow_id).with_for_update())
     if (
         existing_workflow
         and existing_workflow.actor_user_id == user.id
         and existing_workflow.workflow_type == "registration"
         and existing_workflow.status == "completed"
         and existing_workflow.station_id is not None
+        and existing_workflow.preview_hash == data.preview_hash
     ):
         existing_station = await _load_station(db, existing_workflow.station_id)
         return (await serialize_stations(db, [existing_station]))[0]
     workflow = await _active_actor_workflow(db, data.workflow_id, user, "registration")
+    _consume_preview(workflow, data.workflow_version, data.preview_hash)
     await _validate_regions(db, data.city_id, data.district_id)
     station = Station(
         station_code=data.station_code,
@@ -331,24 +372,30 @@ async def telegram_update_station(
     _: User = Depends(require_roles(Role.admin)),
 ):
     user, identity = await _require_telegram_actor(db, data, TELEGRAM_STATION_ROLES)
-    existing_workflow = await db.get(TelegramStationWorkflow, data.workflow_id)
+    existing_workflow = await db.scalar(select(TelegramStationWorkflow).where(TelegramStationWorkflow.id == data.workflow_id).with_for_update())
     if (
         existing_workflow
         and existing_workflow.actor_user_id == user.id
         and existing_workflow.workflow_type == "update"
         and existing_workflow.status == "completed"
         and existing_workflow.station_id == station_id
+        and existing_workflow.preview_hash == data.preview_hash
     ):
         existing_station = await _load_station(db, station_id)
         return (await serialize_stations(db, [existing_station]))[0]
     workflow = await _active_actor_workflow(db, data.workflow_id, user, "update")
+    _consume_preview(workflow, data.workflow_version, data.preview_hash)
     station = await _load_station(db, station_id)
-    excluded = {"telegram_user_id", "telegram_username", "workflow_id"}
+    excluded = {"telegram_user_id", "telegram_username", "workflow_id", "workflow_version", "preview_hash", "expected_before"}
     changes = {key: value for key, value in data.model_dump(exclude_unset=True).items() if key not in excluded}
     if not changes:
         raise HTTPException(422, "NO_STATION_FIELDS")
+    if set(changes) not in ({"city_id"}, {"district_id"}, {"operational_area"}, {"address"}, {"name"}, {"latitude", "longitude"}):
+        raise HTTPException(422, "ONE_LOGICAL_FIELD_REQUIRED")
     await _validate_regions(db, changes.get("city_id", station.city_id), changes.get("district_id", station.district_id))
     before = {key: getattr(station, key) for key in changes}
+    if set(data.expected_before) != set(changes) or any(before[key] != data.expected_before.get(key) for key in changes):
+        raise HTTPException(409, "STATION_CHANGED_AFTER_PREVIEW")
     effective = {key: value for key, value in changes.items() if before[key] != value}
     for key, value in effective.items():
         setattr(station, key, value)
@@ -504,6 +551,14 @@ async def _active_actor_workflow(db: AsyncSession, workflow_id: str, user: User,
     if workflow.status != "in_progress":
         raise HTTPException(409, "WORKFLOW_ALREADY_FINISHED")
     return workflow
+
+
+def _consume_preview(workflow: TelegramStationWorkflow, version: int, preview_hash: str) -> None:
+    if workflow.version != version or workflow.preview_hash != preview_hash:
+        raise HTTPException(409, "WORKFLOW_PREVIEW_STALE")
+    if workflow.preview_consumed_at is not None:
+        raise HTTPException(409, "WORKFLOW_PREVIEW_CONSUMED")
+    workflow.preview_consumed_at = datetime.now(timezone.utc)
 
 
 async def _validate_regions(db: AsyncSession, city_id: int, district_id: int | None) -> None:

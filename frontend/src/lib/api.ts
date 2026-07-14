@@ -14,6 +14,9 @@ import type {
   HeadscaleNode,
   HeadscaleNodeList,
   HeadscaleStationOption,
+  HeadscaleReconciliationAction,
+  HeadscaleReconciliationPreview,
+  HeadscaleReconciliationRow,
   Region,
   PasswordResetPreview,
   OperatorActivity,
@@ -144,6 +147,36 @@ export const getHeadscaleStationOptions = (signal?: AbortSignal) =>
   apiFetch<HeadscaleStationOption[]>("/api/headscale/station-options", { signal });
 export const syncHeadscale = () =>
   apiFetch<{ added: number }>("/api/headscale/sync", { method: "POST" });
+export const getHeadscaleIpReconciliation = (signal?: AbortSignal) =>
+  apiFetch<HeadscaleReconciliationRow[]>("/api/headscale/ip-reconciliation", { signal });
+export const previewHeadscaleReconciliation = (
+  stationId: number,
+  action: HeadscaleReconciliationAction,
+  candidateNodeId?: number,
+) =>
+  apiFetch<HeadscaleReconciliationPreview>(
+    `/api/headscale/stations/${stationId}/reconciliation-preview`,
+    {
+      method: "POST",
+      body: JSON.stringify({ action, candidate_node_id: candidateNodeId ?? null }),
+    },
+  );
+export const applyHeadscaleReconciliation = (
+  preview: HeadscaleReconciliationPreview,
+  confirmation: string,
+) =>
+  apiFetch<HeadscaleReconciliationRow>(`/api/headscale/stations/${preview.station_id}/reconcile`, {
+    method: "POST",
+    body: JSON.stringify({
+      action: preview.action,
+      candidate_node_id:
+        preview.action === "link_node" || preview.action === "replace_node"
+          ? preview.new_node_id
+          : null,
+      preview_token: preview.preview_token,
+      confirmation,
+    }),
+  });
 export const previewHeadscaleApproval = (id: number, deviceType: string, stationId?: number) =>
   apiFetch<HeadscaleApprovalPreview>(`/api/headscale/nodes/${id}/approval-preview`, {
     method: "POST",

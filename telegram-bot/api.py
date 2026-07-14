@@ -141,6 +141,7 @@ class BackendAPI:
         *,
         workflow_id: str,
         workflow_type: str,
+        mode: str,
         station_code: str | None,
         current_step: str,
         correlation_id: str,
@@ -152,6 +153,7 @@ class BackendAPI:
                 **self.telegram_actor(user),
                 "workflow_id": workflow_id,
                 "workflow_type": workflow_type,
+                "mode": mode,
                 "station_code": station_code,
                 "current_step": current_step,
                 "correlation_id": correlation_id,
@@ -167,11 +169,15 @@ class BackendAPI:
         )
         return dict(data or {})
 
-    async def create_station_as_telegram_user(self, user: Any, workflow_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    async def create_station_as_telegram_user(
+        self, user: Any, workflow_id: str, workflow_version: int, preview_hash: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
         data = await self._request(
             "POST",
             "/api/activity/telegram/stations",
-            json={**self.telegram_actor(user), "workflow_id": workflow_id, **payload},
+            json={**self.telegram_actor(user), "workflow_id": workflow_id,
+                  "workflow_version": workflow_version, "preview_hash": preview_hash, **payload},
         )
         return dict(data or {})
 
@@ -180,12 +186,17 @@ class BackendAPI:
         user: Any,
         workflow_id: str,
         station_id: int,
+        workflow_version: int,
+        preview_hash: str,
+        expected_before: dict[str, Any],
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         data = await self._request(
             "PATCH",
             f"/api/activity/telegram/stations/{station_id}",
-            json={**self.telegram_actor(user), "workflow_id": workflow_id, **payload},
+            json={**self.telegram_actor(user), "workflow_id": workflow_id,
+                  "workflow_version": workflow_version, "preview_hash": preview_hash,
+                  "expected_before": expected_before, **payload},
         )
         return dict(data or {})
 
