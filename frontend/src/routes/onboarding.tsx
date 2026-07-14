@@ -175,7 +175,7 @@ function StationInventoryWorkflow() {
   const duplicates: SuspectedDuplicatePair[] = duplicatesQuery.data ?? [];
 
   async function load() {
-    const refreshes = [inventoryQuery.refetch(), nodesQuery.refetch()];
+    const refreshes: Promise<unknown>[] = [inventoryQuery.refetch(), nodesQuery.refetch()];
     if (view === "suspected_duplicate") refreshes.push(duplicatesQuery.refetch());
     await Promise.all(refreshes);
   }
