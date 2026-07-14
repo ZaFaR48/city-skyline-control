@@ -9,6 +9,7 @@ from .routers import (
     regions, registrations, reports, rustdesk, stations, users, webhooks,
 )
 from .scheduler import start_scheduler, stop_scheduler
+from .services.performance import SlowRequestTimingMiddleware
 
 
 @asynccontextmanager
@@ -34,6 +35,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SlowRequestTimingMiddleware)
 
 app.include_router(auth.router,      prefix="/api/auth",       tags=["auth"])
 app.include_router(activity.router,  prefix="/api/activity",   tags=["activity"])

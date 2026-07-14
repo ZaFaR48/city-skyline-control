@@ -16,6 +16,7 @@ from ..models import Role, User
 from ..schemas import ReportStationRow
 from ..services.audit import add_audit
 from ..services.uptime_reports import build_uptime_report
+from ..services.performance import record_result_count
 
 
 router = APIRouter()
@@ -49,7 +50,9 @@ async def uptime_report(
     _: User = Depends(get_current_user),
 ):
     _validate_range(start, end)
-    return await build_uptime_report(db, start=start, end=end, station_id=station_id, district_id=district_id, status=status, source=source)
+    rows = await build_uptime_report(db, start=start, end=end, station_id=station_id, district_id=district_id, status=status, source=source)
+    record_result_count(len(rows))
+    return rows
 
 
 @router.get("/uptime.csv")

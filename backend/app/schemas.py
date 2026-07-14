@@ -110,6 +110,13 @@ class StationHealthOut(BaseModel):
     evidence: dict[str, datetime | None]
     current_event_id: int | None
     linked_node_id: int | None
+    degraded_enter_latency_ms: int
+    degraded_exit_latency_ms: int
+    recovery_samples: int
+    recovery_samples_required: int
+    recovery_started_at: datetime | None
+    recovery_stable_seconds_elapsed: int
+    recovery_stable_seconds_required: int
 
 
 class StationHealthDiagnosticOut(BaseModel):
@@ -233,6 +240,22 @@ class HeadscaleNodeOut(ORMModel):
     duplicate_vpn_node_ids: list[int] = Field(default_factory=list)
 
 
+class HeadscaleNodeListOut(BaseModel):
+    items: list[HeadscaleNodeOut]
+    total: int
+    limit: int
+    offset: int
+    linked_count: int
+    pending_count: int
+
+
+class HeadscaleStationOptionOut(BaseModel):
+    id: int
+    station_code: str
+    name: str
+    headscale_linked: bool
+
+
 class HeadscaleApproveIn(BaseModel):
     device_type: DeviceType
     station_id: int | None = None
@@ -343,6 +366,7 @@ class AttentionStation(BaseModel):
     last_seen_at: datetime | None
     offline_since: datetime | None
     active_alerts: int
+    health: StationHealthOut
 
 
 class DashboardSummaryOut(BaseModel):

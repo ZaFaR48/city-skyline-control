@@ -91,6 +91,13 @@ export interface StationHealth {
   evidence: Record<string, string | null>;
   current_event_id: number | null;
   linked_node_id: number | null;
+  degraded_enter_latency_ms: number;
+  degraded_exit_latency_ms: number;
+  recovery_samples: number;
+  recovery_samples_required: number;
+  recovery_started_at: string | null;
+  recovery_stable_seconds_elapsed: number;
+  recovery_stable_seconds_required: number;
 }
 
 export interface StationList {
@@ -177,6 +184,22 @@ export interface HeadscaleNode {
   duplicate_vpn_node_ids: number[];
 }
 
+export interface HeadscaleNodeList {
+  items: HeadscaleNode[];
+  total: number;
+  limit: number;
+  offset: number;
+  linked_count: number;
+  pending_count: number;
+}
+
+export interface HeadscaleStationOption {
+  id: number;
+  station_code: string;
+  name: string;
+  headscale_linked: boolean;
+}
+
 export interface HeadscaleApprovalPreview {
   node_id: number;
   node_hostname: string;
@@ -240,6 +263,7 @@ export interface AttentionStation {
   last_seen_at: string | null;
   offline_since: string | null;
   active_alerts: number;
+  health: StationHealth;
 }
 
 export interface DashboardSummary {

@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
@@ -140,13 +141,10 @@ function OnboardingPage() {
 }
 
 function StationInventoryWorkflow() {
-  const { district: districtName } = useI18n();
+  const { district: districtName, t } = useI18n();
   const [view, setView] = useState<(typeof INVENTORY_FILTERS)[number]>("pending");
   const [queryText, setQueryText] = useState("");
   const query = useDebounced(queryText);
-  const [stations, setStations] = useState<Station[]>([]);
-  const [nodes, setNodes] = useState<HeadscaleNode[]>([]);
-  const [duplicates, setDuplicates] = useState<SuspectedDuplicatePair[]>([]);
   const [dismissedPairs, setDismissedPairs] = useState<Set<string>>(new Set());
   const [repairStation, setRepairStation] = useState<Station | null>(null);
   const [publishStation, setPublishStation] = useState<Station | null>(null);
@@ -156,25 +154,31 @@ function StationInventoryWorkflow() {
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      const [stationRows, nodeRows, duplicateRows] = await Promise.all([
-        getStationInventory(view, query),
-        getHeadscaleNodes({ approval_status: "approved" }),
-        getSuspectedDuplicates(),
-      ]);
-      setStations(stationRows);
-      setNodes(nodeRows);
-      setDuplicates(duplicateRows);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Station inventory unavailable");
-    }
-  }, [view, query]);
+  const inventoryQuery = useQuery({
+    queryKey: ["onboarding", "station-inventory", { view, query }],
+    queryFn: ({ signal }) => getStationInventory(view, query, signal),
+    placeholderData: keepPreviousData,
+  });
+  const nodesQuery = useQuery({
+    queryKey: ["headscale", "nodes", { approval_status: "approved", view: "onboarding" }],
+    queryFn: ({ signal }) => getHeadscaleNodes({ approval_status: "approved" }, signal),
+    staleTime: 30_000,
+  });
+  const duplicatesQuery = useQuery({
+    queryKey: ["onboarding", "suspected-duplicates"],
+    queryFn: ({ signal }) => getSuspectedDuplicates(signal),
+    enabled: view === "suspected_duplicate",
+    staleTime: 60_000,
+  });
+  const stations: Station[] = inventoryQuery.data?.items ?? [];
+  const nodes: HeadscaleNode[] = nodesQuery.data?.items ?? [];
+  const duplicates: SuspectedDuplicatePair[] = duplicatesQuery.data ?? [];
 
-  useEffect(() => {
-    void load();
-  }, [load]);
+  async function load() {
+    const refreshes = [inventoryQuery.refetch(), nodesQuery.refetch()];
+    if (view === "suspected_duplicate") refreshes.push(duplicatesQuery.refetch());
+    await Promise.all(refreshes);
+  }
 
   async function openLifecycle(station: Station, action: "archive" | "restore") {
     try {
@@ -199,7 +203,7 @@ function StationInventoryWorkflow() {
         setLifecycle(await previewStationLifecycle(stationId, "archive"));
       } else {
         const all = await getStationInventory("all");
-        const station = all.find((item) => item.id === stationId);
+        const station = all.items.find((item) => item.id === stationId);
         if (station) setRepairStation(station);
       }
     } catch (err) {
@@ -222,7 +226,20 @@ function StationInventoryWorkflow() {
 
   return (
     <section className="space-y-4">
-      {error && <Notice tone="error">{error}</Notice>}
+      {(error || inventoryQuery.error || nodesQuery.error || duplicatesQuery.error) && (
+        <div className="glass rounded-xl p-4 text-sm text-destructive flex justify-between gap-3">
+          <span>
+            {error ||
+              (inventoryQuery.error instanceof Error ? inventoryQuery.error.message : null) ||
+              (nodesQuery.error instanceof Error ? nodesQuery.error.message : null) ||
+              (duplicatesQuery.error instanceof Error ? duplicatesQuery.error.message : null) ||
+              t("api.unavailable")}
+          </span>
+          <button onClick={() => void load()} className="underline">
+            {t("common.retry")}
+          </button>
+        </div>
+      )}
       {message && <Notice>{message}</Notice>}
       <div className="glass rounded-xl p-4">
         <h2 className="font-semibold">Station inventory</h2>
@@ -335,6 +352,22 @@ function StationInventoryWorkflow() {
                 </td>
               </tr>
             ))}
+            {inventoryQuery.isPending && (
+              <tr>
+                <td colSpan={15} className="p-10 text-center text-muted-foreground">
+                  {t("loading.stations")}
+                </td>
+              </tr>
+            )}
+            {inventoryQuery.isSuccess &&
+              !inventoryQuery.isPlaceholderData &&
+              stations.length === 0 && (
+                <tr>
+                  <td colSpan={15} className="p-10 text-center text-muted-foreground">
+                    No stations match these filters.
+                  </td>
+                </tr>
+              )}
           </tbody>
         </table>
       </div>
@@ -1476,7 +1509,7 @@ function DuplicateVpnWorkflow() {
         getHeadscaleNodes({ approval_status: "approved", device_type: "station" }),
       ]);
       setGroups(report);
-      setNodes(nodeRows);
+      setNodes(nodeRows.items);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Duplicate VPN report unavailable");
     }

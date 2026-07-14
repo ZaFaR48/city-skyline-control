@@ -6,6 +6,7 @@ from ..deps import get_current_user
 from ..models import User
 from ..schemas import DashboardSummaryOut
 from ..services.dashboard import build_dashboard_summary
+from ..services.performance import record_result_count
 
 
 router = APIRouter()
@@ -16,4 +17,6 @@ async def summary(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(get_current_user),
 ):
-    return await build_dashboard_summary(db)
+    result = await build_dashboard_summary(db)
+    record_result_count(result.total_stations)
+    return result

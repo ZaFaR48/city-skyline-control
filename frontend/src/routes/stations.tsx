@@ -1,10 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowUpDown, ChevronLeft, ChevronRight, Eye, RefreshCw, Search, X } from "lucide-react";
 import { Topbar } from "@/components/Topbar";
 import { StatusBadge, pingTone } from "@/components/StatusBadge";
 import { getRegions, getStation, getStations } from "@/lib/api";
-import type { Region, Station, StationDetail, StationStatus } from "@/lib/types";
+import { useI18n } from "@/lib/i18n";
+import type { Station, StationDetail, StationStatus } from "@/lib/types";
 
 export const Route = createFileRoute("/stations")({
   head: () => ({ meta: [{ title: "Stations · City Parking Control Center" }] }),
@@ -31,9 +33,7 @@ function useDebounced(value: string, delay = 350) {
 }
 
 function StationsPage() {
-  const [items, setItems] = useState<Station[]>([]);
-  const [total, setTotal] = useState(0);
-  const [regions, setRegions] = useState<Region[]>([]);
+  const { t } = useI18n();
   const [queryText, setQueryText] = useState("");
   const query = useDebounced(queryText);
   const [district, setDistrict] = useState("");
@@ -44,52 +44,46 @@ function StationsPage() {
   const [sort, setSort] = useState<SortKey>("station_code");
   const [direction, setDirection] = useState<"asc" | "desc">("asc");
   const [page, setPage] = useState(1);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
 
-  useEffect(() => {
-    getRegions(true)
-      .then(setRegions)
-      .catch(() => setRegions([]));
-  }, []);
+  const regionsQuery = useQuery({
+    queryKey: ["regions", "active"],
+    queryFn: ({ signal }) => getRegions(true, signal),
+    staleTime: 60_000,
+  });
   useEffect(() => {
     setPage(1);
   }, [query, district, status, monitoring, linked, recordState, sort, direction]);
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await getStations({
-        q: query,
-        district_id: district || undefined,
-        status: status || undefined,
-        monitoring_configured:
-          monitoring === "configured" ? true : monitoring === "unconfigured" ? false : undefined,
-        headscale_linked: linked === "linked" ? true : linked === "unlinked" ? false : undefined,
-        active: recordState === "active" ? true : recordState === "inactive" ? false : undefined,
-        archived: recordState === "archived" ? true : recordState === "active" ? false : undefined,
-        sort,
-        direction,
-        limit: PAGE_SIZE,
-        offset: (page - 1) * PAGE_SIZE,
-      });
-      setItems(result.items);
-      setTotal(result.total);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Stations could not be loaded");
-    } finally {
-      setLoading(false);
-    }
-  }, [query, district, status, monitoring, linked, recordState, sort, direction, page]);
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const stationParams = useMemo(
+    () => ({
+      q: query,
+      district_id: district || undefined,
+      status: status || undefined,
+      monitoring_configured:
+        monitoring === "configured" ? true : monitoring === "unconfigured" ? false : undefined,
+      headscale_linked: linked === "linked" ? true : linked === "unlinked" ? false : undefined,
+      active: recordState === "active" ? true : recordState === "inactive" ? false : undefined,
+      archived: recordState === "archived" ? true : recordState === "active" ? false : undefined,
+      sort,
+      direction,
+      limit: PAGE_SIZE,
+      offset: (page - 1) * PAGE_SIZE,
+    }),
+    [query, district, status, monitoring, linked, recordState, sort, direction, page],
+  );
+  const stationsQuery = useQuery({
+    queryKey: ["stations", stationParams],
+    queryFn: ({ signal }) => getStations(stationParams, signal),
+    placeholderData: keepPreviousData,
+  });
+  const items = stationsQuery.data?.items ?? [];
+  const total = stationsQuery.data?.total ?? 0;
+  const loading = stationsQuery.isPending;
 
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const districts = useMemo(
-    () => regions.filter((region) => region.region_type === "district"),
-    [regions],
+    () => (regionsQuery.data ?? []).filter((region) => region.region_type === "district"),
+    [regionsQuery.data],
   );
   function toggleSort(key: SortKey) {
     if (sort === key) setDirection((value) => (value === "asc" ? "desc" : "asc"));
@@ -101,7 +95,14 @@ function StationsPage() {
 
   return (
     <>
-      <Topbar title="Stations" subtitle={`${total} Dushanbe stations match current filters`} />
+      <Topbar
+        title="Stations"
+        subtitle={
+          stationsQuery.data
+            ? `${total} Dushanbe stations match current filters`
+            : t("loading.stations")
+        }
+      />
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
         <div className="glass rounded-xl p-4 flex flex-wrap gap-3">
           <div className="relative flex-1 min-w-[260px]">
@@ -161,11 +162,18 @@ function StationsPage() {
             ]}
           />
         </div>
-        {error && (
+        {stationsQuery.error && (
           <div className="glass rounded-xl p-4 flex justify-between text-sm text-destructive">
-            <span>{error}</span>
-            <button onClick={load} className="inline-flex gap-2 items-center">
-              <RefreshCw className="size-4" /> Retry
+            <span>
+              {stationsQuery.error instanceof Error
+                ? stationsQuery.error.message
+                : t("api.unavailable")}
+            </span>
+            <button
+              onClick={() => void stationsQuery.refetch()}
+              className="inline-flex gap-2 items-center"
+            >
+              <RefreshCw className="size-4" /> {t("common.retry")}
             </button>
           </div>
         )}
@@ -207,13 +215,15 @@ function StationsPage() {
                     view={() => setSelected(station.id)}
                   />
                 ))}
-                {!loading && items.length === 0 && (
-                  <tr>
-                    <td colSpan={11} className="py-14 text-center text-muted-foreground">
-                      No stations match these filters.
-                    </td>
-                  </tr>
-                )}
+                {stationsQuery.isSuccess &&
+                  !stationsQuery.isPlaceholderData &&
+                  items.length === 0 && (
+                    <tr>
+                      <td colSpan={11} className="py-14 text-center text-muted-foreground">
+                        No stations match these filters.
+                      </td>
+                    </tr>
+                  )}
                 {loading &&
                   items.length === 0 &&
                   Array.from({ length: 8 }).map((_, index) => (
@@ -226,9 +236,11 @@ function StationsPage() {
           </div>
           <div className="px-4 py-3 border-t border-border flex justify-between text-xs text-muted-foreground">
             <span>
-              {total
-                ? `Showing ${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, total)} of ${total}`
-                : "No records"}
+              {loading
+                ? t("loading.stations")
+                : total
+                  ? `Showing ${(page - 1) * PAGE_SIZE + 1}–${Math.min(page * PAGE_SIZE, total)} of ${total}`
+                  : "No records"}
             </span>
             <div className="flex items-center gap-2">
               <button
@@ -304,13 +316,12 @@ function StationRow({ station, view }: { station: Station; view: () => void }) {
 }
 
 function StationDrawer({ stationId, close }: { stationId: number; close: () => void }) {
-  const [detail, setDetail] = useState<StationDetail | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    getStation(stationId)
-      .then(setDetail)
-      .catch((err) => setError(err instanceof Error ? err.message : "Details unavailable"));
-  }, [stationId]);
+  const detailQuery = useQuery({
+    queryKey: ["station", stationId],
+    queryFn: ({ signal }) => getStation(stationId, signal),
+  });
+  const detail: StationDetail | undefined = detailQuery.data;
+  const error = detailQuery.error instanceof Error ? detailQuery.error.message : null;
   return (
     <div
       className="fixed inset-0 z-50 bg-black/50 flex justify-end"

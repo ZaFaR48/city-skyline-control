@@ -1,11 +1,13 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { Link, createFileRoute } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { BellRing, Network, RefreshCw, Server, ServerCog, ServerOff, Video } from "lucide-react";
 import { Topbar } from "@/components/Topbar";
 import { StatCard } from "@/components/StatCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import { getDashboardSummary } from "@/lib/api";
-import type { DashboardSummary } from "@/lib/types";
+import { getStoredUser } from "@/lib/auth";
+import { useI18n } from "@/lib/i18n";
+import type { AttentionStation, User } from "@/lib/types";
 
 export const Route = createFileRoute("/")({
   head: () => ({ meta: [{ title: "Dashboard · City Parking Control Center" }] }),
@@ -31,32 +33,27 @@ function duration(value: string | null) {
 }
 
 function Dashboard() {
-  const [data, setData] = useState<DashboardSummary | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setData(await getDashboardSummary());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Dashboard data could not be loaded");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-  useEffect(() => {
-    void load();
-    const timer = window.setInterval(load, 30_000);
-    return () => window.clearInterval(timer);
-  }, [load]);
+  const { t } = useI18n();
+  const user = getStoredUser<User>();
+  const canInspectRecovery = user?.role === "admin" || user?.role === "operator";
+  const { data, error, isPending, refetch } = useQuery({
+    queryKey: ["dashboard", "summary"],
+    queryFn: ({ signal }) => getDashboardSummary(signal),
+    refetchInterval: 30_000,
+  });
 
   return (
     <>
       <Topbar title="Operations Overview" subtitle="Dushanbe pilot · verified monitoring data" />
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        {loading && !data && <LoadingCards />}
-        {error && <ErrorState message={error} retry={load} />}
+        {isPending && !data && <LoadingCards label={t("loading.dashboard")} />}
+        {error && (
+          <ErrorState
+            message={error instanceof Error ? error.message : t("api.unavailable")}
+            retry={() => void refetch()}
+            retryLabel={t("common.retry")}
+          />
+        )}
         {data && (
           <>
             <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
@@ -111,10 +108,19 @@ function Dashboard() {
 
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
               <section className="glass rounded-xl p-5 xl:col-span-2">
-                <h2 className="text-sm font-semibold">Stations Requiring Attention</h2>
+                <h2 className="text-sm font-semibold">
+                  {t("dashboard.attentionTitle")} — {data.top_problem_stations.length}{" "}
+                  {t("dashboard.of")} {data.total_stations}
+                </h2>
                 <p className="text-xs text-muted-foreground mb-4">
-                  Prioritized from outages, alerts, degraded state, ping, and camera failures
+                  {t("dashboard.attentionSubtext")}
                 </p>
+                <Link
+                  to="/stations"
+                  className="inline-flex mb-3 text-xs text-primary hover:underline"
+                >
+                  {t("dashboard.viewAll")} {data.total_stations} {t("dashboard.stationsNoun")}
+                </Link>
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[760px] text-sm">
                     <thead className="text-[11px] uppercase tracking-wider text-muted-foreground">
@@ -130,7 +136,11 @@ function Dashboard() {
                     </thead>
                     <tbody>
                       {data.top_problem_stations.map((station) => (
-                        <tr key={station.station_id} className="border-t border-border">
+                        <tr
+                          key={station.station_id}
+                          className="border-t border-border"
+                          title={canInspectRecovery ? recoveryDetails(station, t) : undefined}
+                        >
                           <td className="py-3">
                             <StatusBadge status={station.status} />
                           </td>
@@ -230,7 +240,15 @@ function Health({ value, label, tone }: { value: number; label: string; tone: st
 function Empty({ text }: { text: string }) {
   return <div className="py-8 text-center text-sm text-muted-foreground">{text}</div>;
 }
-function ErrorState({ message, retry }: { message: string; retry: () => void }) {
+function ErrorState({
+  message,
+  retry,
+  retryLabel,
+}: {
+  message: string;
+  retry: () => void;
+  retryLabel: string;
+}) {
   return (
     <div className="glass rounded-xl border-destructive/40 p-5 flex items-center justify-between gap-3">
       <span className="text-sm text-destructive">{message}</span>
@@ -238,17 +256,33 @@ function ErrorState({ message, retry }: { message: string; retry: () => void }) 
         onClick={retry}
         className="inline-flex items-center gap-2 rounded-md border border-border px-3 py-2 text-xs"
       >
-        <RefreshCw className="size-3.5" /> Retry
+        <RefreshCw className="size-3.5" /> {retryLabel}
       </button>
     </div>
   );
 }
-function LoadingCards() {
+function LoadingCards({ label }: { label: string }) {
   return (
-    <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
-      {Array.from({ length: 6 }).map((_, index) => (
-        <div key={index} className="glass h-28 rounded-xl animate-pulse" />
-      ))}
+    <div aria-live="polite">
+      <p className="mb-3 text-sm text-muted-foreground">{label}</p>
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4">
+        {Array.from({ length: 6 }).map((_, index) => (
+          <div key={index} className="glass h-28 rounded-xl animate-pulse" />
+        ))}
+      </div>
     </div>
   );
+}
+
+function recoveryDetails(station: AttentionStation, t: (key: string) => string) {
+  const health = station.health;
+  return [
+    `${t("health.latestLatency")}: ${station.last_ping_ms === null ? "—" : `${station.last_ping_ms} ms`}`,
+    `${t("health.degradedEnter")}: ${health.degraded_enter_latency_ms} ms`,
+    `${t("health.degradedExit")}: ${health.degraded_exit_latency_ms} ms`,
+    `${t("health.recoverySamples")}: ${health.recovery_samples}/${health.recovery_samples_required}`,
+    `${t("health.recoveryTimer")}: ${health.recovery_stable_seconds_elapsed}/${health.recovery_stable_seconds_required} s`,
+    `${t("health.canonicalReason")}: ${health.overall_reason_code}`,
+    `${t("health.timeInState")}: ${health.current_state_duration_seconds ?? 0} s`,
+  ].join("\n");
 }

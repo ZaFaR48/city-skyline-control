@@ -1,25 +1,37 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, RefreshCw, Search, Settings2, ShieldCheck, X, XCircle } from "lucide-react";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import {
+  AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
+  RefreshCw,
+  Search,
+  Settings2,
+  ShieldCheck,
+  X,
+  XCircle,
+} from "lucide-react";
 import { Topbar } from "@/components/Topbar";
 import {
   approveHeadscaleNode,
   applyHeadscaleClassification,
   getHeadscaleNodes,
-  getStations,
+  getHeadscaleStationOptions,
   previewHeadscaleApproval,
   previewHeadscaleClassification,
   rejectHeadscaleNode,
   syncHeadscale,
 } from "@/lib/api";
 import { getStoredUser } from "@/lib/auth";
+import { useI18n } from "@/lib/i18n";
 import type {
   ApprovalStatus,
   DeviceType,
   HeadscaleApprovalPreview,
   HeadscaleClassificationPreview,
   HeadscaleNode,
-  Station,
+  HeadscaleStationOption,
   User,
 } from "@/lib/types";
 
@@ -43,6 +55,7 @@ type Filters = {
 };
 
 const INITIAL_FILTERS: Filters = { approval: "", deviceType: "", online: "", linked: "" };
+const PAGE_SIZE = 25;
 
 function useDebounced(value: string, delay = 350) {
   const [debounced, setDebounced] = useState(value);
@@ -54,13 +67,13 @@ function useDebounced(value: string, delay = 350) {
 }
 
 function HeadscalePage() {
+  const { t } = useI18n();
   const user = getStoredUser<User>();
   const isAdmin = user?.role === "admin";
-  const [nodes, setNodes] = useState<HeadscaleNode[]>([]);
-  const [stations, setStations] = useState<Station[]>([]);
   const [filters, setFilters] = useState<Filters>(INITIAL_FILTERS);
   const [queryText, setQueryText] = useState("");
   const query = useDebounced(queryText);
+  const [page, setPage] = useState(1);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [selections, setSelections] = useState<Record<number, Selection>>({});
@@ -69,38 +82,40 @@ function HeadscalePage() {
     useState<HeadscaleClassificationPreview | null>(null);
   const [classificationConfirmation, setClassificationConfirmation] = useState("");
 
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      const [nodeRows, stationRows] = await Promise.all([
-        getHeadscaleNodes({
-          q: query,
-          approval_status: filters.approval || undefined,
-          device_type: filters.deviceType || undefined,
-          online: filters.online || undefined,
-          linked: filters.linked || undefined,
-        }),
-        getStations({ limit: 200, approval: "all" }),
-      ]);
-      setNodes(nodeRows);
-      setStations(stationRows.items);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Headscale inventory unavailable");
-    }
-  }, [filters, query]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const pendingCount = useMemo(
-    () => nodes.filter((node) => node.approval_status === "pending").length,
-    [nodes],
+  const nodeParams = useMemo(
+    () => ({
+      q: query,
+      approval_status: filters.approval || undefined,
+      device_type: filters.deviceType || undefined,
+      online: filters.online || undefined,
+      linked: filters.linked || undefined,
+      limit: PAGE_SIZE,
+      offset: (page - 1) * PAGE_SIZE,
+    }),
+    [filters, query, page],
   );
-  const linkedCount = useMemo(
-    () => nodes.filter((node) => node.station_id !== null).length,
-    [nodes],
-  );
+  useEffect(() => setPage(1), [filters, query]);
+  const nodesQuery = useQuery({
+    queryKey: ["headscale", "nodes", nodeParams],
+    queryFn: ({ signal }) => getHeadscaleNodes(nodeParams, signal),
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  });
+  const stationsQuery = useQuery({
+    queryKey: ["headscale", "station-options"],
+    queryFn: ({ signal }) => getHeadscaleStationOptions(signal),
+    staleTime: 30_000,
+  });
+  const nodes: HeadscaleNode[] = nodesQuery.data?.items ?? [];
+  const stations: HeadscaleStationOption[] = stationsQuery.data ?? [];
+
+  async function load() {
+    await Promise.all([nodesQuery.refetch(), stationsQuery.refetch()]);
+  }
+
+  const pendingCount = nodesQuery.data?.pending_count ?? 0;
+  const linkedCount = nodesQuery.data?.linked_count ?? 0;
+  const pages = Math.max(1, Math.ceil((nodesQuery.data?.total ?? 0) / PAGE_SIZE));
 
   async function sync() {
     setBusy(true);
@@ -225,10 +240,26 @@ function HeadscalePage() {
     <>
       <Topbar
         title="Headscale Inventory"
-        subtitle={`${linkedCount} linked station nodes · ${pendingCount} pending in current view`}
+        subtitle={
+          nodesQuery.data
+            ? `${linkedCount} linked station nodes · ${pendingCount} pending in current view`
+            : t("loading.headscale")
+        }
       />
       <div className="flex-1 space-y-4 overflow-y-auto p-6">
-        {error && <div className="glass p-4 text-destructive">{error}</div>}
+        {(error || nodesQuery.error || stationsQuery.error) && (
+          <div className="glass p-4 text-destructive flex justify-between gap-3">
+            <span>
+              {error ||
+                (nodesQuery.error instanceof Error ? nodesQuery.error.message : null) ||
+                (stationsQuery.error instanceof Error ? stationsQuery.error.message : null) ||
+                t("api.unavailable")}
+            </span>
+            <button onClick={() => void load()} className="inline-flex items-center gap-2">
+              <RefreshCw className="size-4" /> {t("common.retry")}
+            </button>
+          </div>
+        )}
         <div className="glass flex flex-wrap items-end justify-between gap-4 rounded-xl p-4">
           <div>
             <div className="font-medium">Device inventory</div>
@@ -506,7 +537,7 @@ function HeadscalePage() {
                   </tr>
                 );
               })}
-              {nodes.length === 0 && (
+              {nodesQuery.isSuccess && !nodesQuery.isPlaceholderData && nodes.length === 0 && (
                 <tr>
                   <td
                     colSpan={isAdmin ? 10 : 9}
@@ -518,6 +549,32 @@ function HeadscalePage() {
               )}
             </tbody>
           </table>
+          <div className="flex items-center justify-between border-t border-border px-4 py-3 text-xs text-muted-foreground">
+            <span>
+              {nodesQuery.data
+                ? `Showing ${nodesQuery.data.offset + (nodes.length ? 1 : 0)}–${nodesQuery.data.offset + nodes.length} of ${nodesQuery.data.total}`
+                : t("loading.headscale")}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                disabled={page === 1}
+                onClick={() => setPage((value) => value - 1)}
+                className="rounded border border-border p-1 disabled:opacity-40"
+              >
+                <ChevronLeft className="size-4" />
+              </button>
+              <span>
+                Page {page} / {pages}
+              </span>
+              <button
+                disabled={page >= pages}
+                onClick={() => setPage((value) => value + 1)}
+                className="rounded border border-border p-1 disabled:opacity-40"
+              >
+                <ChevronRight className="size-4" />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 

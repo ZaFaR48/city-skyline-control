@@ -12,6 +12,8 @@ import type {
   HeadscaleApprovalPreview,
   HeadscaleClassificationPreview,
   HeadscaleNode,
+  HeadscaleNodeList,
+  HeadscaleStationOption,
   Region,
   PasswordResetPreview,
   OperatorActivity,
@@ -106,7 +108,8 @@ export async function login(username: string, password: string): Promise<LoginRe
   return data;
 }
 
-export const getDashboardSummary = () => apiFetch<DashboardSummary>("/api/dashboard/summary");
+export const getDashboardSummary = (signal?: AbortSignal) =>
+  apiFetch<DashboardSummary>("/api/dashboard/summary", { signal });
 export const sendPresenceHeartbeat = () =>
   apiFetch<{ last_activity_at: string; source: string; write_performed: boolean }>(
     "/api/activity/heartbeat",
@@ -116,12 +119,14 @@ export const getOperatorPresence = (params: Record<string, string | undefined> =
   apiFetch<OperatorPresence[]>(`/api/activity/admin/presence${query(params)}`);
 export const getOperatorActivity = (params: Record<string, string | undefined> = {}) =>
   apiFetch<OperatorActivity[]>(`/api/activity/admin/events${query(params)}`);
-export const getRegions = (active?: boolean) =>
-  apiFetch<Region[]>(`/api/regions${query({ active })}`);
+export const getRegions = (active?: boolean, signal?: AbortSignal) =>
+  apiFetch<Region[]>(`/api/regions${query({ active })}`, { signal });
 export const getStations = (
   params: Record<string, string | number | boolean | null | undefined> = {},
-) => apiFetch<StationList>(`/api/stations${query(params)}`);
-export const getStation = (id: number) => apiFetch<StationDetail>(`/api/stations/${id}`);
+  signal?: AbortSignal,
+) => apiFetch<StationList>(`/api/stations${query(params)}`, { signal });
+export const getStation = (id: number, signal?: AbortSignal) =>
+  apiFetch<StationDetail>(`/api/stations/${id}`, { signal });
 export const getCameras = () => apiFetch<Camera[]>("/api/cameras");
 export const getAlerts = (
   params: Record<string, string | number | boolean | null | undefined> = {},
@@ -130,7 +135,13 @@ export const acknowledgeAlert = (id: number) =>
   apiFetch<AlertItem>(`/api/alerts/${id}/ack`, { method: "POST" });
 export const getHeadscaleNodes = (
   params: Record<string, string | number | boolean | null | undefined> = {},
-) => apiFetch<HeadscaleNode[]>(`/api/headscale/nodes${query(params)}`);
+  signal?: AbortSignal,
+) =>
+  apiFetch<HeadscaleNodeList>(`/api/headscale/nodes${query({ ...params, page: true })}`, {
+    signal,
+  });
+export const getHeadscaleStationOptions = (signal?: AbortSignal) =>
+  apiFetch<HeadscaleStationOption[]>("/api/headscale/station-options", { signal });
 export const syncHeadscale = () =>
   apiFetch<{ added: number }>("/api/headscale/sync", { method: "POST" });
 export const previewHeadscaleApproval = (id: number, deviceType: string, stationId?: number) =>
@@ -330,8 +341,10 @@ export const applyStationRepair = (
     method: "POST",
     body: JSON.stringify({ ...changes, preview_token: previewToken, confirmation }),
   });
-export const getStationInventory = (view: string, q?: string) =>
-  apiFetch<Station[]>(`/api/onboarding/station-inventory${query({ view, q })}`);
+export const getStationInventory = (view: string, q?: string, signal?: AbortSignal) =>
+  apiFetch<StationList>(`/api/onboarding/station-inventory${query({ view, q, page: true })}`, {
+    signal,
+  });
 export const previewStationLifecycle = (stationId: number, action: "archive" | "restore") =>
   apiFetch<StationLifecyclePreview>(`/api/onboarding/stations/${stationId}/${action}-preview`, {
     method: "POST",
@@ -346,8 +359,8 @@ export const applyStationLifecycle = (
     method: "POST",
     body: JSON.stringify({ preview_token: previewToken, confirmation }),
   });
-export const getSuspectedDuplicates = () =>
-  apiFetch<SuspectedDuplicatePair[]>("/api/onboarding/suspected-duplicates");
+export const getSuspectedDuplicates = (signal?: AbortSignal) =>
+  apiFetch<SuspectedDuplicatePair[]>("/api/onboarding/suspected-duplicates", { signal });
 export const keepBothSuspectedDuplicates = (leftStationId: number, rightStationId: number) =>
   apiFetch<{ status: string; changed: boolean }>("/api/onboarding/suspected-duplicates/keep-both", {
     method: "POST",

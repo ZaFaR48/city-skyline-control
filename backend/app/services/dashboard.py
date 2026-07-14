@@ -38,7 +38,18 @@ async def build_dashboard_summary(db: AsyncSession) -> DashboardSummaryOut:
         )
     ).scalars().all()
     station_ids = [station.id for station in stations]
-    health_by_station = await resolve_station_health_batch(db, list(stations))
+    cameras = list((await db.execute(
+        select(Camera).where(Camera.station_id.in_(station_ids))
+    )).scalars().all()) if station_ids else []
+    nodes = list((await db.execute(
+        select(HeadscaleNode).where(HeadscaleNode.station_id.in_(station_ids))
+    )).scalars().all()) if station_ids else []
+    health_by_station = await resolve_station_health_batch(
+        db,
+        list(stations),
+        nodes=nodes,
+        cameras=cameras,
+    )
     statuses = Counter(health_by_station[station.id].overall_status for station in stations)
     total = len(stations)
 
@@ -46,23 +57,13 @@ async def build_dashboard_summary(db: AsyncSession) -> DashboardSummaryOut:
     camera_online = 0
     camera_offline = 0
     camera_failures: dict[int, int] = {}
-    if station_ids:
-        camera_rows = (
-            await db.execute(
-                select(
-                    Camera.station_id,
-                    func.count(Camera.id),
-                    func.count(Camera.id).filter(Camera.status == StationStatus.online.value),
-                    func.count(Camera.id).filter(Camera.status == StationStatus.offline.value),
-                )
-                .where(Camera.station_id.in_(station_ids))
-                .group_by(Camera.station_id)
-            )
-        ).all()
-        camera_total = sum(row[1] for row in camera_rows)
-        camera_online = sum(row[2] for row in camera_rows)
-        camera_offline = sum(row[3] for row in camera_rows)
-        camera_failures = {row[0]: row[3] for row in camera_rows}
+    if cameras:
+        camera_total = len(cameras)
+        camera_online = sum(camera.status == StationStatus.online.value for camera in cameras)
+        camera_offline = sum(camera.status == StationStatus.offline.value for camera in cameras)
+        for camera in cameras:
+            if camera.status == StationStatus.offline.value:
+                camera_failures[camera.station_id] = camera_failures.get(camera.station_id, 0) + 1
 
     active_alert_rows = []
     if station_ids:
@@ -76,17 +77,11 @@ async def build_dashboard_summary(db: AsyncSession) -> DashboardSummaryOut:
     alerts_by_station = dict(active_alert_rows)
     active_alerts = sum(alerts_by_station.values())
 
-    approved_nodes = (
-        await db.execute(
-            select(func.count(HeadscaleNode.id))
-            .join(Station, HeadscaleNode.station_id == Station.id)
-            .where(
-                HeadscaleNode.approval_status == ApprovalStatus.approved.value,
-                HeadscaleNode.device_type == DeviceType.station.value,
-                production_station_filter(),
-            )
-        )
-    ).scalar_one()
+    approved_nodes = sum(
+        node.approval_status == ApprovalStatus.approved.value
+        and node.device_type == DeviceType.station.value
+        for node in nodes
+    )
     pending_nodes = (
         await db.execute(
             select(func.count(HeadscaleNode.id)).where(
@@ -151,8 +146,6 @@ async def build_dashboard_summary(db: AsyncSession) -> DashboardSummaryOut:
         station
         for station in stations
         if health_by_station[station.id].overall_status != StationStatus.online.value
-        or alerts_by_station.get(station.id, 0)
-        or camera_failures.get(station.id, 0)
     ]
     problem_stations.sort(key=problem_score, reverse=True)
     attention = [
@@ -171,6 +164,7 @@ async def build_dashboard_summary(db: AsyncSession) -> DashboardSummaryOut:
                 else None
             ),
             active_alerts=alerts_by_station.get(station.id, 0),
+            health=health_by_station[station.id].model_values(),
         )
         for station in problem_stations[:10]
     ]

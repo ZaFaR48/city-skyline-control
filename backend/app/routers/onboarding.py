@@ -5,8 +5,9 @@ from datetime import datetime, timezone
 from difflib import SequenceMatcher
 import io
 from math import asin, cos, radians, sin, sqrt
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import StreamingResponse
 from sqlalchemy import String, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,6 +44,7 @@ from ..schemas import (
     DuplicateVpnStation,
     OnboardingValidationError,
     StationOut,
+    StationListOut,
     StationApprovalApplyIn,
     StationApprovalPreviewOut,
     StationRepairApplyIn,
@@ -58,6 +60,7 @@ from ..schemas import (
 from ..services.audit import add_audit
 from ..services.confirmation_tokens import create_confirmation_token, verify_confirmation_token
 from ..services.station_views import serialize_stations
+from ..services.performance import record_result_count
 
 
 router = APIRouter()
@@ -271,32 +274,36 @@ async def apply_station_repair(
     return (await serialize_stations(db, [station]))[0]
 
 
-@router.get("/station-inventory", response_model=list[StationOut])
+@router.get("/station-inventory", response_model=StationListOut | list[StationOut])
 async def station_inventory(
     view: str = "all",
     q: str | None = None,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_roles(Role.admin)),
+    page: bool = False,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ):
     allowed = {"all", "pending", "approved", "archived", "missing_headscale", "suspected_duplicate", "data_quality", "operator_created"}
     if view not in allowed:
         raise HTTPException(422, "Unknown station inventory filter")
-    stations = list((await db.execute(
+    stmt = (
         select(Station)
         .join(OperationalRegion, Station.city_id == OperationalRegion.id)
         .where(OperationalRegion.code == "dushanbe")
         .options(selectinload(Station.city), selectinload(Station.district))
         .order_by(Station.station_code)
-    )).scalars().all())
+    )
+    if view == "pending":
+        stmt = stmt.where(Station.approved_at.is_(None), Station.is_archived.is_(False))
+    elif view == "approved":
+        stmt = stmt.where(Station.approved_at.is_not(None), Station.is_archived.is_(False))
+    elif view == "archived":
+        stmt = stmt.where(Station.is_archived.is_(True))
+    stations = list((await db.execute(stmt)).scalars().all())
     rows = await serialize_stations(db, stations, include_actor_attribution=True)
     duplicate_ids = await _suspected_duplicate_ids(db, stations) if view == "suspected_duplicate" else set()
-    if view == "pending":
-        rows = [row for row in rows if row.approved_at is None and not row.is_archived]
-    elif view == "approved":
-        rows = [row for row in rows if row.approved_at is not None and not row.is_archived]
-    elif view == "archived":
-        rows = [row for row in rows if row.is_archived]
-    elif view == "missing_headscale":
+    if view == "missing_headscale":
         rows = [row for row in rows if not row.headscale_linked and not row.is_archived]
     elif view == "suspected_duplicate":
         rows = [row for row in rows if row.id in duplicate_ids]
@@ -338,6 +345,12 @@ async def station_inventory(
                 )
             ).casefold()
         ]
+    total = len(rows)
+    if page:
+        items = rows[offset : offset + limit]
+        record_result_count(len(items))
+        return StationListOut(items=items, total=total, limit=limit, offset=offset)
+    record_result_count(len(rows))
     return rows
 
 
@@ -394,7 +407,9 @@ async def suspected_duplicate_report(
         .where(OperationalRegion.code == "dushanbe", Station.is_archived.is_(False))
         .order_by(Station.station_code)
     )).scalars().all())
-    return await _suspected_duplicate_pairs(db, stations)
+    rows = await _suspected_duplicate_pairs(db, stations)
+    record_result_count(len(rows))
+    return rows
 
 
 @router.post("/suspected-duplicates/keep-both")

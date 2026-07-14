@@ -42,17 +42,9 @@ async def serialize_stations(
             await db.execute(select(OperationalRegion).where(OperationalRegion.id.in_(region_ids)))
         ).scalars().all()
     }
-    camera_rows = (
-        await db.execute(
-            select(
-                Camera.station_id,
-                func.count(Camera.id),
-                func.count(Camera.id).filter(Camera.status == StationStatus.online.value),
-            )
-            .where(Camera.station_id.in_(ids))
-            .group_by(Camera.station_id)
-        )
-    ).all()
+    cameras = list((await db.execute(
+        select(Camera).where(Camera.station_id.in_(ids))
+    )).scalars().all())
     alert_rows = (
         await db.execute(
             select(Alert.station_id, func.count(Alert.id))
@@ -65,10 +57,21 @@ async def serialize_stations(
             select(HeadscaleNode).where(HeadscaleNode.station_id.in_(ids))
         )
     ).scalars().all()
-    camera_counts = {row[0]: (row[1], row[2]) for row in camera_rows}
+    camera_counts: dict[int, tuple[int, int]] = defaultdict(lambda: (0, 0))
+    for camera in cameras:
+        total, online = camera_counts[camera.station_id]
+        camera_counts[camera.station_id] = (
+            total + 1,
+            online + (1 if camera.status == StationStatus.online.value else 0),
+        )
     alert_counts = dict(alert_rows)
     node_by_station = {node.station_id: node for node in nodes}
-    health_by_station = await resolve_station_health_batch(db, stations)
+    health_by_station = await resolve_station_health_batch(
+        db,
+        stations,
+        nodes=list(nodes),
+        cameras=cameras,
+    )
     audit_rows = []
     if include_actor_attribution:
         audit_rows = list((

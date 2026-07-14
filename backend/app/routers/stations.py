@@ -29,6 +29,7 @@ from ..services.ping_monitor import ping_station
 from ..services.station_views import serialize_stations
 from ..services.station_permissions import enforce_station_create_policy, enforce_station_update_policy
 from ..services.operator_activity import add_activity_event, touch_presence
+from ..services.performance import record_result_count
 from ..services.station_visibility import production_station_filter
 from ..services.station_health import resolve_station_health_batch
 
@@ -152,6 +153,7 @@ async def list_stations(
     ordering = desc(sort_columns[sort]) if direction == "desc" else asc(sort_columns[sort])
     stations = (await db.execute(stmt.order_by(ordering, Station.id).limit(limit).offset(offset))).scalars().unique().all()
     items = await serialize_stations(db, list(stations))
+    record_result_count(len(items))
     return StationListOut(items=items, total=total, limit=limit, offset=offset)
 
 

@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import String, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import aliased, selectinload
 
 from ..database import get_db
 from ..deps import require_roles
-from ..models import ApprovalStatus, DeviceType, HeadscaleNode, Role, Station, User
+from ..models import ApprovalStatus, DeviceType, HeadscaleNode, OperationalRegion, Role, Station, User
 from ..schemas import (
     HeadscaleApproveConfirmIn,
     HeadscaleApproveIn,
@@ -17,24 +18,64 @@ from ..schemas import (
     HeadscaleClassificationIn,
     HeadscaleClassificationPreviewOut,
     HeadscaleLinkIn,
+    HeadscaleNodeListOut,
     HeadscaleNodeOut,
+    HeadscaleStationOptionOut,
 )
 from ..services.audit import add_audit
 from ..services.confirmation_tokens import create_confirmation_token, verify_confirmation_token
 from ..services.headscale import sync_headscale_nodes
 from ..services.ping_monitor import ping_station
+from ..services.performance import record_result_count
 
 
 router = APIRouter()
 
 
-@router.get("/nodes", response_model=list[HeadscaleNodeOut])
+@router.get("/station-options", response_model=list[HeadscaleStationOptionOut])
+async def station_options(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_roles(Role.admin)),
+):
+    node = aliased(HeadscaleNode)
+    rows = (
+        await db.execute(
+            select(
+                Station.id,
+                Station.station_code,
+                Station.name,
+                node.id.is_not(None).label("headscale_linked"),
+            )
+            .join(OperationalRegion, Station.city_id == OperationalRegion.id)
+            .outerjoin(
+                node,
+                (node.station_id == Station.id)
+                & (node.approval_status == ApprovalStatus.approved.value)
+                & (node.device_type == DeviceType.station.value),
+            )
+            .where(
+                OperationalRegion.code == "dushanbe",
+                Station.is_active.is_(True),
+                Station.is_archived.is_(False),
+            )
+            .order_by(Station.station_code, Station.id)
+        )
+    ).mappings().all()
+    result = [HeadscaleStationOptionOut(**row) for row in rows]
+    record_result_count(len(result))
+    return result
+
+
+@router.get("/nodes", response_model=HeadscaleNodeListOut | list[HeadscaleNodeOut])
 async def list_nodes(
     q: str | None = None,
     approval_status: ApprovalStatus | None = None,
     device_type: DeviceType | None = None,
     online: bool | None = None,
     linked: bool | None = None,
+    page: bool = False,
+    limit: Annotated[int, Query(ge=1, le=100)] = 25,
+    offset: Annotated[int, Query(ge=0)] = 0,
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_roles(Role.admin)),
 ):
@@ -59,8 +100,44 @@ async def list_nodes(
         stmt = stmt.where(HeadscaleNode.online == online)
     if linked is not None:
         stmt = stmt.where(HeadscaleNode.station_id.is_not(None) if linked else HeadscaleNode.station_id.is_(None))
-    nodes = (await db.execute(stmt.order_by(HeadscaleNode.hostname))).scalars().all()
-    return await _serialize_nodes(db, list(nodes))
+    if not page:
+        nodes = (
+            await db.execute(stmt.order_by(HeadscaleNode.hostname, HeadscaleNode.id))
+        ).scalars().all()
+        items = await _serialize_nodes(db, list(nodes))
+        record_result_count(len(items))
+        return items
+
+    filtered = stmt.with_only_columns(
+        HeadscaleNode.id.label("node_id"),
+        HeadscaleNode.station_id.label("station_id"),
+        HeadscaleNode.approval_status.label("approval_status"),
+    ).order_by(None).subquery()
+    counts = (await db.execute(
+        select(
+            func.count(filtered.c.node_id),
+            func.count(filtered.c.node_id).filter(filtered.c.station_id.is_not(None)),
+            func.count(filtered.c.node_id).filter(
+                filtered.c.approval_status == ApprovalStatus.pending.value
+            ),
+        )
+    )).one()
+    nodes = (
+        await db.execute(
+            stmt.order_by(HeadscaleNode.hostname, HeadscaleNode.id).limit(limit).offset(offset)
+        )
+    ).scalars().all()
+    items = await _serialize_nodes(db, list(nodes))
+    result = HeadscaleNodeListOut(
+        items=items,
+        total=counts[0],
+        limit=limit,
+        offset=offset,
+        linked_count=counts[1],
+        pending_count=counts[2],
+    )
+    record_result_count(len(items))
+    return result
 
 
 @router.get("/nodes/pending", response_model=list[HeadscaleNodeOut])

@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from time import perf_counter
 from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import Integer, column, select, true, values
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
@@ -18,6 +19,7 @@ from ..models import (
     StationStatus,
     StationStatusEvent,
 )
+from .performance import record_resolver_duration
 
 
 ComponentStatus = Literal["online", "degraded", "offline", "unknown", "stale", "not_configured"]
@@ -57,6 +59,13 @@ class StationHealth:
     evidence: dict[str, datetime | None]
     current_event_id: int | None
     linked_node_id: int | None
+    degraded_enter_latency_ms: int
+    degraded_exit_latency_ms: int
+    recovery_samples: int
+    recovery_samples_required: int
+    recovery_started_at: datetime | None
+    recovery_stable_seconds_elapsed: int
+    recovery_stable_seconds_required: int
 
     def model_values(self) -> dict:
         return asdict(self)
@@ -67,32 +76,61 @@ async def resolve_station_health_batch(
     stations: list[Station],
     *,
     now: datetime | None = None,
+    nodes: list[HeadscaleNode] | None = None,
+    cameras: list[Camera] | None = None,
 ) -> dict[int, StationHealth]:
     if not stations:
         return {}
+    resolver_started = perf_counter()
     current = now or datetime.now(timezone.utc)
     station_ids = [station.id for station in stations]
-    nodes = list((await db.execute(
-        select(HeadscaleNode).where(
-            HeadscaleNode.station_id.in_(station_ids),
-            HeadscaleNode.approval_status == ApprovalStatus.approved.value,
-            HeadscaleNode.device_type == DeviceType.station.value,
-        )
-    )).scalars().all())
+    if nodes is None:
+        nodes = list((await db.execute(
+            select(HeadscaleNode).where(HeadscaleNode.station_id.in_(station_ids))
+        )).scalars().all())
+    monitoring_nodes = [
+        node
+        for node in nodes
+        if node.station_id in station_ids
+        and node.approval_status == ApprovalStatus.approved.value
+        and node.device_type == DeviceType.station.value
+    ]
+
+    # A DISTINCT ON query over ping_history made PostgreSQL read and sort every
+    # historical row for the selected stations. Drive one LIMIT 1 index lookup
+    # per station instead; ix_ping_station_time already supports this access
+    # pattern, so no additional production index is required.
+    station_values = values(
+        column("station_id", Integer),
+        name="requested_station_ids",
+    ).data([(station_id,) for station_id in station_ids])
+    latest_ping_id = (
+        select(PingHistory.id.label("ping_id"))
+        .where(PingHistory.station_id == station_values.c.station_id)
+        .correlate(station_values)
+        .order_by(PingHistory.checked_at.desc(), PingHistory.id.desc())
+        .limit(1)
+        .lateral("latest_ping")
+    )
     latest_pings = list((await db.execute(
         select(PingHistory)
-        .where(PingHistory.station_id.in_(station_ids))
-        .distinct(PingHistory.station_id)
-        .order_by(PingHistory.station_id, PingHistory.checked_at.desc(), PingHistory.id.desc())
+        .select_from(
+            station_values
+            .join(latest_ping_id, true())
+            .join(PingHistory, PingHistory.id == latest_ping_id.c.ping_id)
+        )
     )).scalars().all())
-    cameras = list((await db.execute(select(Camera).where(Camera.station_id.in_(station_ids)))).scalars().all())
+    if cameras is None:
+        cameras = list((await db.execute(
+            select(Camera).where(Camera.station_id.in_(station_ids))
+        )).scalars().all())
     open_events = list((await db.execute(
         select(StationStatusEvent)
         .where(StationStatusEvent.station_id.in_(station_ids), StationStatusEvent.ended_at.is_(None))
         .order_by(StationStatusEvent.station_id, StationStatusEvent.started_at.desc())
     )).scalars().all())
 
-    node_by_station = {node.station_id: node for node in nodes}
+    node_by_station = {node.station_id: node for node in monitoring_nodes}
     ping_by_station = {ping.station_id: ping for ping in latest_pings}
     cameras_by_station: dict[int, list[Camera]] = {station_id: [] for station_id in station_ids}
     for camera in cameras:
@@ -101,7 +139,7 @@ async def resolve_station_health_batch(
     for event in open_events:
         event_by_station.setdefault(event.station_id, event)
 
-    return {
+    result = {
         station.id: resolve_station_health(
             station,
             node=node_by_station.get(station.id),
@@ -112,6 +150,8 @@ async def resolve_station_health_batch(
         )
         for station in stations
     }
+    record_resolver_duration((perf_counter() - resolver_started) * 1000)
+    return result
 
 
 def resolve_station_health(
@@ -202,6 +242,11 @@ def resolve_station_health(
         else None
     )
     duration = max(0, int((now - state_started).total_seconds())) if state_started else None
+    recovery_elapsed = (
+        max(0, int((now - station.recovery_started_at).total_seconds()))
+        if station.recovery_started_at
+        else 0
+    )
     configured = [station.vpn_ip is not None and node is not None, bool(cameras), station.telemetry_at is not None]
     coverage = "none" if not configured[0] else "full" if all(configured) else "partial"
     return StationHealth(
@@ -227,4 +272,11 @@ def resolve_station_health(
         },
         current_event_id=current_event.id if current_event and current_event.new_status == overall_status else None,
         linked_node_id=node.id if node else None,
+        degraded_enter_latency_ms=settings.DEGRADED_ENTER_MS,
+        degraded_exit_latency_ms=settings.DEGRADED_EXIT_MS,
+        recovery_samples=int(station.consecutive_low_latency or 0),
+        recovery_samples_required=settings.DEGRADED_EXIT_CONSECUTIVE_CHECKS,
+        recovery_started_at=station.recovery_started_at,
+        recovery_stable_seconds_elapsed=recovery_elapsed,
+        recovery_stable_seconds_required=settings.RECOVERY_STABLE_SECONDS,
     )
