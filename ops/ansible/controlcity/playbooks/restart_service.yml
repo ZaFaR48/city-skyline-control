@@ -1,0 +1,30 @@
+---
+- name: Controlled managed-service restart
+  hosts: "{{ target | default('city_canary') }}"
+  gather_facts: false
+  serial: 10
+  vars:
+    allowed_services:
+      rustdesk: rustdesk
+      time_sync: systemd-timesyncd
+      guardian: city-station-agent
+      healer: city-station-healer
+      tailscale: tailscaled
+  tasks:
+    - name: Reject non-allowlisted service
+      ansible.builtin.assert:
+        that:
+          - service_key is defined
+          - service_key in allowed_services
+        fail_msg: "Requested service is not allowlisted."
+    - name: Restart allowlisted service
+      ansible.builtin.systemd:
+        name: "{{ allowed_services[service_key] }}"
+        state: restarted
+    - name: Verify service is active
+      ansible.builtin.command: "systemctl is-active {{ allowed_services[service_key] }}"
+      register: service_state
+      changed_when: false
+      retries: 5
+      delay: 2
+      until: service_state.rc == 0
