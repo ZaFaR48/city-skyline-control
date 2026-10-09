@@ -1,0 +1,31 @@
+---
+- name: Controlled station reboot
+  hosts: "{{ target | default('city_canary') }}"
+  gather_facts: false
+  serial: 1
+  any_errors_fatal: true
+  pre_tasks:
+    - name: Verify host is reachable before reboot
+      ansible.builtin.wait_for_connection:
+        timeout: 15
+    - name: Record pre-reboot boot ID
+      ansible.builtin.command: cat /proc/sys/kernel/random/boot_id
+      register: boot_before
+      changed_when: false
+  tasks:
+    - name: Reboot station safely
+      ansible.builtin.reboot:
+        msg: "ControlCity administrator requested a controlled reboot"
+        pre_reboot_delay: 2
+        connect_timeout: 10
+        reboot_timeout: 300
+        post_reboot_delay: 8
+        test_command: "systemctl is-system-running --wait || true"
+    - name: Record post-reboot boot ID
+      ansible.builtin.command: cat /proc/sys/kernel/random/boot_id
+      register: boot_after
+      changed_when: false
+    - name: Assert reboot actually happened
+      ansible.builtin.assert:
+        that: [ "boot_before.stdout != boot_after.stdout" ]
+        fail_msg: "Boot ID did not change; reboot cannot be confirmed."
