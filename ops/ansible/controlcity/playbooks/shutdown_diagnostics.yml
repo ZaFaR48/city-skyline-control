@@ -1,0 +1,28 @@
+---
+- name: Shutdown and reboot diagnostics
+  hosts: "{{ target | default('city_canary') }}"
+  gather_facts: false
+  serial: 20
+  tasks:
+    - name: Collect shutdown evidence
+      ansible.builtin.shell: |
+        set -o pipefail
+        echo "=== CURRENT ==="
+        date -Is
+        printf 'boot_id='; cat /proc/sys/kernel/random/boot_id
+        printf 'uptime='; cut -d. -f1 /proc/uptime
+        echo "=== BOOTS ==="
+        journalctl --list-boots --no-pager | tail -20 || true
+        echo "=== LAST ==="
+        last -x | head -40 || true
+        echo "=== PREVIOUS BOOT END ==="
+        journalctl -b -1 --no-pager -n 250 2>/dev/null || true
+        echo "=== FAILURE SIGNALS ==="
+        journalctl -b -1 --no-pager 2>/dev/null |
+          grep -Ei 'watchdog|panic|oom|out of memory|thermal|shutdown|reboot|power|segfault|I/O error|nvme|ext4|reset|hang|lockup' |
+          tail -250 || true
+      args: { executable: /bin/bash }
+      register: evidence
+      changed_when: false
+    - ansible.builtin.debug:
+        var: evidence.stdout_lines

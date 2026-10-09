@@ -430,6 +430,23 @@ class DashboardSummaryOut(BaseModel):
     active_alerts: int
     approved_station_vpn_nodes: int
     pending_headscale_nodes: int
+
+    # Additive fleet-wide observability counters.  These deliberately expose
+    # individual component state instead of collapsing every problem to
+    # station OFFLINE.
+    monitoring_full_stations: int = 0
+    monitoring_partial_stations: int = 0
+    monitoring_uncovered_stations: int = 0
+    headscale_online_stations: int = 0
+    headscale_problem_stations: int = 0
+    headscale_unconfigured_stations: int = 0
+    agent_online_stations: int = 0
+    agent_stale_stations: int = 0
+    agent_unconfigured_stations: int = 0
+    camera_online_stations: int = 0
+    camera_problem_stations: int = 0
+    camera_unconfigured_stations: int = 0
+
     district_health: list[DistrictHealth]
     recent_alerts: list[AlertOut]
     top_problem_stations: list[AttentionStation]
