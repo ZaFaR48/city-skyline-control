@@ -1,0 +1,53 @@
+---
+- name: Full safe station check
+  hosts: "{{ target | default('city_canary') }}"
+  gather_facts: true
+  serial: 20
+  any_errors_fatal: false
+  tasks:
+    - name: Read station identity
+      ansible.builtin.shell: |
+        set -o pipefail
+        printf 'station=%s\n' "{{ inventory_hostname }}"
+        printf 'hostname='; hostname
+        printf 'boot_id='; cat /proc/sys/kernel/random/boot_id
+        printf 'machine_id='; cat /etc/machine-id
+        printf 'uptime_seconds='; cut -d. -f1 /proc/uptime
+        printf 'tailscale_ip='; tailscale ip -4 2>/dev/null | head -1 || true
+      args: { executable: /bin/bash }
+      register: identity
+      changed_when: false
+
+    - name: Check managed services
+      ansible.builtin.shell: |
+        set -o pipefail
+        for svc in tailscaled rustdesk city-station-agent city-station-healer systemd-timesyncd; do
+          printf '%s=' "$svc"
+          systemctl is-active "$svc" 2>/dev/null || true
+        done
+      args: { executable: /bin/bash }
+      register: services
+      changed_when: false
+
+    - name: Check resources
+      ansible.builtin.shell: |
+        free -m | awk '/Mem:/ {print "ram_total_mb="$2" ram_used_mb="$3" ram_free_mb="$7}'
+        df -Pm / | awk 'NR==2 {print "disk_total_mb="$2" disk_used_mb="$3" disk_free_mb="$4" disk_used_pct="$5}'
+        printf 'load='; cut -d' ' -f1-3 /proc/loadavg
+      register: resources
+      changed_when: false
+
+    - name: Check failed units
+      ansible.builtin.command: systemctl --failed --no-legend --plain
+      register: failed_units
+      changed_when: false
+      failed_when: false
+
+    - name: Print normalized report
+      ansible.builtin.debug:
+        msg:
+          station: "{{ inventory_hostname }}"
+          identity: "{{ identity.stdout_lines }}"
+          services: "{{ services.stdout_lines }}"
+          resources: "{{ resources.stdout_lines }}"
+          failed_units: "{{ failed_units.stdout_lines }}"
