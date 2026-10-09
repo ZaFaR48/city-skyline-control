@@ -53,6 +53,21 @@ async def build_dashboard_summary(db: AsyncSession) -> DashboardSummaryOut:
     statuses = Counter(health_by_station[station.id].overall_status for station in stations)
     total = len(stations)
 
+    # Preserve component semantics at fleet level. A stale Guardian or an
+    # offline camera must not make the whole station look physically offline.
+    coverage_counts = Counter(
+        health_by_station[station.id].monitoring_coverage for station in stations
+    )
+    headscale_counts = Counter(
+        health_by_station[station.id].headscale_status for station in stations
+    )
+    agent_counts = Counter(
+        health_by_station[station.id].agent_status for station in stations
+    )
+    camera_component_counts = Counter(
+        health_by_station[station.id].camera_status for station in stations
+    )
+
     camera_total = 0
     camera_online = 0
     camera_offline = 0
@@ -183,6 +198,27 @@ async def build_dashboard_summary(db: AsyncSession) -> DashboardSummaryOut:
         active_alerts=active_alerts,
         approved_station_vpn_nodes=approved_nodes,
         pending_headscale_nodes=pending_nodes,
+        monitoring_full_stations=coverage_counts["full"],
+        monitoring_partial_stations=coverage_counts["partial"],
+        monitoring_uncovered_stations=coverage_counts["none"],
+        headscale_online_stations=headscale_counts["online"],
+        headscale_problem_stations=(
+            headscale_counts["offline"]
+            + headscale_counts["stale"]
+            + headscale_counts["degraded"]
+        ),
+        headscale_unconfigured_stations=headscale_counts["not_configured"],
+        agent_online_stations=agent_counts["online"],
+        agent_stale_stations=agent_counts["stale"],
+        agent_unconfigured_stations=agent_counts["not_configured"],
+        camera_online_stations=camera_component_counts["online"],
+        camera_problem_stations=(
+            camera_component_counts["offline"]
+            + camera_component_counts["stale"]
+            + camera_component_counts["degraded"]
+            + camera_component_counts["unknown"]
+        ),
+        camera_unconfigured_stations=camera_component_counts["not_configured"],
         district_health=district_health,
         recent_alerts=list(recent_alerts),
         top_problem_stations=attention,
